@@ -59,7 +59,10 @@ So the model doesn't need to *fit* in fast memory — it needs to be **placed**:
   **resident in RAM at int4** (~9.9 GB);
 - the **19,456 routed experts** (75 MoE layers × 256 + the MTP head, ~19 MB each
   at int4) live **on disk** (~370 GB) and are **streamed on demand**, with a
-  per-layer LRU cache, a learned pinned hot-store, and an optional VRAM tier.
+  per-layer SLRU cache with self-tuning frequency protection (a one-shot draft
+  or speculative load can't evict an expert with proven reuse; the protection
+  threshold adapts to the workload), a learned pinned hot-store, and an
+  optional VRAM tier.
 
 The engine is a single C file (`c/glm.c`) plus small headers. No BLAS, no Python
 at runtime, no GPU required.

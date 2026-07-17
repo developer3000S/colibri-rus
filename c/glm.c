@@ -176,13 +176,15 @@ typedef struct {
     float **Lc, **Rc; int max_t;                 /* alias della KVState attiva */
     int *kv_start;                               /* prima pos valida nella KV del layer (MTP: parziale) */
     KVState *kv;
-    ESlot **ecache; int *ecn; int ecap;          /* LRU expert per-layer */
+    ESlot **ecache; int *ecn; int ecap;          /* expert cache per-layer (SLRU adattivo) */
     float **kv_dev_L, **kv_dev_R; int *kv_dev_valid; /* ombra KV su device (decode) */
     ESlot ws[64];                                /* working set del layer corrente (load paralleli) */
     ESlot **pin; int *npin;                      /* HOT-STORE: expert pinnati in RAM (mai evicted) */
     uint32_t **eusage;                           /* contatori persistenti (per STATS/PIN) */
     uint32_t **eheat;                            /* calore recente per promotion/demotion live */
     uint32_t **elast, eaccess_clock;              /* recency per LFRU session-local */
+    int8_t **efreq;                              /* freq della cache streaming: >0 vivo, <0 ghost (ricordata) */
+    TierAdapt *ead;                              /* stato adaptive-k per layer (vedi tier.h) */
     /* DSA lightning indexer (attivo solo se i pesi out-idx-* sono presenti) */
     int has_dsa;
     QT *ix_wq, *ix_wk, *ix_wp;                   /* per layer FULL: wq_b, wk, weights_proj */
@@ -1527,6 +1529,7 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
     m->pin=calloc(NR,sizeof(ESlot*)); m->npin=calloc(NR,sizeof(int));
     m->eusage=calloc(NR,sizeof(uint32_t*)); m->eheat=calloc(NR,sizeof(uint32_t*));
     m->elast=calloc(NR,sizeof(uint32_t*));
+    m->efreq=calloc(NR,sizeof(int8_t*)); m->ead=calloc(NR,sizeof(TierAdapt));
     m->kv=calloc(1,sizeof(KVState));
     m->kv_start=m->kv->kv_start=calloc(NR,sizeof(int));
     for(int i=0;i<c->n_layers;i++){
@@ -1571,6 +1574,8 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
             m->eusage[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->eheat[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->elast[i]=calloc(c->n_experts,sizeof(uint32_t));
+            m->efreq[i]=calloc(c->n_experts,sizeof(int8_t));
+            tier_adapt_init(&m->ead[i]);
         }
         #undef P
     }
@@ -1617,6 +1622,8 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
             m->eusage[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->eheat[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->elast[i]=calloc(c->n_experts,sizeof(uint32_t));
+            m->efreq[i]=calloc(c->n_experts,sizeof(int8_t));
+            tier_adapt_init(&m->ead[i]);
             m->kv_start[i]=-1;                    /* KV MTP: parte dalla prima posizione di decode */
             #undef PM
         }
@@ -2809,6 +2816,30 @@ static void attention(Model *m, Layer *l, int layer, float *x, int S, int pos_ba
     attention_rows(m,l,layer,x,S,pos_base,NULL,NULL,out);
 }
 
+/* Victim per la cache streaming di layer / streaming-cache victim: SLRU con
+ * protezione adattiva (vedi tier.h). LRU tra gli expert non protetti
+ * (freq <= k), cosi' i load one-shot (draft MTP, predizioni PILOT) ruotano
+ * tra loro invece di sfrattare gli expert con riuso provato; fallback alla
+ * LRU pura se tutto il layer e' protetto. eid<0 = slot pilota
+ * nascosto/fallito: peso morto, esce per primo. */
+static int ecache_victim(const ESlot *Sl, int nn, const int8_t *freq, int k){
+    int v=-1, fb=0; uint64_t vu=UINT64_MAX, fu=UINT64_MAX;
+    for(int z=0;z<nn;z++){
+        if(Sl[z].eid<0) return z;
+        if(freq[Sl[z].eid]<=k && Sl[z].used<vu){ v=z; vu=Sl[z].used; }
+        if(Sl[z].used<fu){ fb=z; fu=Sl[z].used; }
+    }
+    return v>=0 ? v : fb;
+}
+
+/* k medio sui layer sparsi — telemetria per verificare che l'adaptive-k
+ * stia lavorando (stampato nei summary di REPLAY e run) */
+static double ecache_k_avg(Model *m){
+    double s=0; int n=0;
+    for(int i=0;i<=m->c.n_layers;i++) if(m->ecache[i]){ s+=m->ead[i].k; n++; }
+    return n ? s/n : 0;
+}
+
 /* MoE GLM su x[S,hidden] -> out (router sigmoid/noaux_tc, n_group=1, + shared expert).
  * BATCH-UNION: per S>1 (prefill, verifica MTP) ogni expert UNICO del batch viene caricato
  * una volta sola e moltiplicato per tutte le posizioni che lo usano (pesi letti 1 volta);
@@ -3108,8 +3139,9 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
             ESlot *P=m->pin[layer];
             for(int z=0;z<m->npin[layer];z++) if(P[z].eid==eid){ m->hits++; use[j]=&P[z]; break; }
             if(!use[j]){ ESlot *Sl=m->ecache[layer]; int nn=m->ecn[layer];
-                for(int z=0;z<nn;z++) if(Sl[z].eid==eid){ m->hits++; Sl[z].used=(uint64_t)__atomic_add_fetch(&m->eclock,1,__ATOMIC_RELAXED); use[j]=&Sl[z]; break; } }
-            if(!use[j]){ qof[j]=nmiss; use[j]=&m->ws[nmiss]; missk[nmiss++]=j; m->miss++;
+                for(int z=0;z<nn;z++) if(Sl[z].eid==eid){ m->hits++; Sl[z].used=(uint64_t)__atomic_add_fetch(&m->eclock,1,__ATOMIC_RELAXED); use[j]=&Sl[z];
+                    tier_touch(&m->ead[layer],&m->efreq[layer][eid],nn>=m->ecap); tier_probe(&m->ead[layer],1); break; } }
+            if(!use[j]){ qof[j]=nmiss; use[j]=&m->ws[nmiss]; missk[nmiss++]=j; m->miss++; tier_probe(&m->ead[layer],0);
                 if(g_disk_split){ if(m->ld_ctx==1) m->miss_draft++; else if(m->ld_ctx==2) m->miss_absorb++; } }
         }
         int metal_done=0;
@@ -3324,12 +3356,15 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
          * dispatched miss slot, before the nr==0 skip) already waited on all ws[] loads
          * for this block, so they are complete before the LRU swap — and the gen-tagged
          * cursor keeps any still-spinning worker off a wrong-generation slot. */
-        { ESlot *Sl=m->ecache[layer]; int *nn=&m->ecn[layer];   /* promozione LRU (swap buffer) */
+        { ESlot *Sl=m->ecache[layer]; int *nn=&m->ecn[layer];   /* promozione SLRU (swap buffer) */
+          TierAdapt *ad=&m->ead[layer]; int8_t *fq=m->efreq[layer];
           int promo = nmiss<m->ecap ? nmiss : m->ecap;
           for(int a=0;a<promo;a++){ int q=nmiss-1-a; ESlot *dst;
               if(*nn<m->ecap) dst=&Sl[(*nn)++];
-              else { int lru=0; for(int z=1;z<*nn;z++) if(Sl[z].used<Sl[lru].used) lru=z; dst=&Sl[lru]; }
-              ESlot tmp=*dst; *dst=m->ws[q]; m->ws[q]=tmp; dst->used=(uint64_t)__atomic_add_fetch(&m->eclock,1,__ATOMIC_RELAXED); }
+              else { dst=&Sl[ecache_victim(Sl,*nn,fq,ad->k)];
+                     if(dst->eid>=0){ tier_evict(ad,fq,m->c.n_experts,m->elast[layer],dst->eid,m->ecap); tier_maybe_adapt(ad); } }
+              ESlot tmp=*dst; *dst=m->ws[q]; m->ws[q]=tmp; dst->used=(uint64_t)__atomic_add_fetch(&m->eclock,1,__ATOMIC_RELAXED);
+              tier_admit(&fq[dst->eid]); }
         }
     }
     /* ---- FASE E: shared expert (PIPE2: gia' sul device; Metal CB: gia' sommata) ---- */
@@ -3470,10 +3505,17 @@ static void pilot_realload(Model *m, int layer, int eid){
     for(int z=0;z<m->npin[layer];z++) if(P[z].eid==eid){ pthread_mutex_unlock(&g_pilot_mx); return; }
     ESlot *Sl=m->ecache[layer]; int nn=m->ecn[layer];
     for(int z=0;z<nn;z++) if(Sl[z].eid==eid){ pthread_mutex_unlock(&g_pilot_mx); return; }
-    int slot,isnew;                                     /* cresci se c'e' posto, altrimenti LRU */
+    int slot,isnew;                                     /* cresci se c'e' posto, altrimenti victim SLRU */
     if(nn<m->ecap){ slot=nn; isnew=1; }
-    else { int lru=0; for(int z=1;z<nn;z++) if(Sl[z].used<Sl[lru].used) lru=z; slot=lru; isnew=0; }
+    else { slot=ecache_victim(Sl,nn,m->efreq[layer],m->ead[layer].k); isnew=0; }
     ESlot *dst=&Sl[slot];
+    if(!isnew && dst->eid>=0){                          /* il residente muore quando il pread ne riusa lo slab:
+                                                         * contabilizza l'eviction ORA, qualunque sia l'esito del load.
+                                                         * Stato per-layer: sicuro per l'invariante di possesso-layer
+                                                         * (il main non tocca mai questo layer finche' siamo qui). */
+        tier_evict(&m->ead[layer],m->efreq[layer],m->c.n_experts,m->elast[layer],dst->eid,m->ecap);
+        tier_maybe_adapt(&m->ead[layer]);
+    }
     dst->eid=-1;                                        /* nascondi dagli scan-hint mentre carica */
     g_pilot_inflight[layer]++;
     pthread_mutex_unlock(&g_pilot_mx);
@@ -3483,6 +3525,7 @@ static void pilot_realload(Model *m, int layer, int eid){
     pthread_mutex_lock(&g_pilot_mx);
     if(rc==0){
         dst->used=(uint64_t)__atomic_add_fetch(&m->eclock,1,__ATOMIC_RELAXED);
+        tier_admit(&m->efreq[layer][eid]);
         if(isnew) m->ecn[layer]=slot+1;                 /* pubblica lo slot SOLO ora che eid e' valido */
         atomic_fetch_add_explicit(&g_pilot_loads,1,memory_order_relaxed);
     } else {
@@ -4443,12 +4486,12 @@ static void emit_stream(int t, void *ud){
     if(!e->quiet && ++e->count%16==0){ double tt=e->m->hits+e->m->miss;
         if(g_cache_route && e->m->route_slots){
             double swap=100.0*e->m->route_swaps/e->m->route_slots;
-            fprintf(stderr,"\n[t=%d  RSS %.2f GB  hit %.0f%%  swap %.0f%%  %.2f tok/s  %.2f tok/fw]\n", e->count,
-                rss_gb(), tt?100.0*e->m->hits/tt:0.0, swap, e->count/(now_s()-e->t0),
+            fprintf(stderr,"\n[t=%d  RSS %.2f GB  hit %.0f%%  k %.1f  swap %.0f%%  %.2f tok/s  %.2f tok/fw]\n", e->count,
+                rss_gb(), tt?100.0*e->m->hits/tt:0.0, ecache_k_avg(e->m), swap, e->count/(now_s()-e->t0),
                 e->m->n_fw?(double)e->m->n_emit/e->m->n_fw:1.0);
         } else {
-            fprintf(stderr,"\n[t=%d  RSS %.2f GB  hit %.0f%%  %.2f tok/s  %.2f tok/fw]\n", e->count,
-                rss_gb(), tt?100.0*e->m->hits/tt:0.0, e->count/(now_s()-e->t0),
+            fprintf(stderr,"\n[t=%d  RSS %.2f GB  hit %.0f%%  k %.1f  %.2f tok/s  %.2f tok/fw]\n", e->count,
+                rss_gb(), tt?100.0*e->m->hits/tt:0.0, ecache_k_avg(e->m), e->count/(now_s()-e->t0),
                 e->m->n_fw?(double)e->m->n_emit/e->m->n_fw:1.0);
         }
     }
@@ -4656,8 +4699,8 @@ static void run_replay(Model *m, const int *full, int nfull, int np){
         if(g_prof){ prof_lat(now_s()-tf0); m->n_fw++; m->n_emit++; }
     }
     double dt=now_s()-t0, tot=m->hits+m->miss;
-    printf("REPLAY decode: %d tokens in %.3fs | %.2f tok/s | expert hit %.1f%%\n",
-        steps,dt,steps/dt,tot?100.0*m->hits/tot:0.0);
+    printf("REPLAY decode: %d tokens in %.3fs | %.2f tok/s | expert hit %.1f%% | cache k %.1f\n",
+        steps,dt,steps/dt,tot?100.0*m->hits/tot:0.0,ecache_k_avg(m));
     profile_print(m,dt);
     if(g_prof) prof_report(m,&pb,dt,steps,stdout);
 #ifdef COLI_CUDA
@@ -4709,8 +4752,8 @@ static void run_text(Model *m, const char *snap, const char *prompt, int ngen){
     double tot=m->hits+m->miss;
     int nsp=0; for(int i=0;i<c->n_layers;i++) if(m->L[i].sparse) nsp++;
     printf("\n---\nprefill %d tokens in %.2fs | decode %d tokens in %.2fs (%.2f tok/s) | "
-           "expert hit rate %.1f%% | RSS %.2f GB",
-        np,prefill_t,produced,dt,produced/dt,tot?100.0*m->hits/tot:0.0,rss_gb());
+           "expert hit rate %.1f%% | cache k %.1f | RSS %.2f GB",
+        np,prefill_t,produced,dt,produced/dt,tot?100.0*m->hits/tot:0.0,ecache_k_avg(m),rss_gb());
     if(g_cache_route && m->route_slots)
         printf(" | swap %.1f%% (%llu/%llu)",
             100.0*m->route_swaps/m->route_slots,

@@ -37,6 +37,7 @@ c/tests/test_schema_gbnf
 c/tests/test_schema_gbnf.exe
 c/tests/test_compat_direct
 c/tests/test_compat_direct.exe
+result
 
 # oracoli tiny generati (make_glm_oracle.py) e dati benchmark scaricati
 c/glm_tiny/

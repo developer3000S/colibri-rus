@@ -386,7 +386,19 @@ test-c: $(TEST_BINS)
 test-python:
 	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'
 
-test: test-c test-python
+# Go launcher tests (issue #310). Gated on the Go toolchain being present so the
+# dependency-free Python path still runs `make check` without Go installed; when
+# Go is available (CI / developers) gofmt, vet and the test suite all gate.
+test-go:
+	@if command -v go >/dev/null 2>&1; then \
+		cd go && \
+		{ test -z "$$(gofmt -l .)" || { echo "gofmt: run 'gofmt -w c/go'"; exit 1; }; } && \
+		go vet ./... && go test ./...; \
+	else \
+		echo "go toolchain not found: skipping Go launcher tests"; \
+	fi
+
+test: test-c test-python test-go
 
 # --- Efficiency / regression suite (issue: "test the program for inefficiencies") ---
 # The tiny-model assertions live in test_inefficiency.py and run as part of
@@ -437,3 +449,12 @@ clean:
 bench: iobench$(EXE)
 	@if [ -n "$(ARGS)" ]; then ./iobench$(EXE) $(ARGS); else echo "built iobench$(EXE) — run: ./iobench$(EXE) <file> <MB> <iters> <threads> <direct 0|1>"; fi
 .PHONY: all colibri glm cuda-test cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench
+
+# Optional dependency-free Go port of the `coli` launcher (issue #310). The build
+# is not part of `all`; the Python `coli` is still the installed default. Its test
+# suite runs under `make check` via `test-go` when the Go toolchain is present.
+# Requires the Go toolchain; builds ./coli-go, which finds the engine and Python
+# support files in this directory exactly like ./coli does.
+coli-go:
+	cd go && go build -o ../coli-go$(EXE) ./...
+.PHONY: all glm cuda-test cuda-bench cuda-dll portable test-c test-python test-go test check clean install uninstall bench coli-go

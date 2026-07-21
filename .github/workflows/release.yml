@@ -70,6 +70,7 @@ jobs:
           cp c/openai_server.py dist/
           cp c/resource_plan.py dist/
           cp c/doctor.py dist/
+          cp c/ramdisk.py dist/
           cp LICENSE dist/
           cd dist
           if [ "${{ matrix.ext }}" = ".exe" ]; then

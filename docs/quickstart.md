@@ -96,11 +96,13 @@ cd colibri/c
 self-test. When it prints:
 
 ```
-engine self-test: 32/32  (expected 32/32)
+engine self-test: 32/32  (expected ~30-32/32; FP near-ties are toolchain-dependent)
 ```
 
-the engine is working correctly. (On Windows Option A you already have the
-binary — you can skip this step.)
+the engine is working correctly. Some toolchains report 30/32 or 31/32 because
+two tiny-oracle positions are floating-point near-ties; this is still a valid
+self-test result. (On Windows Option A you already have the binary — you can
+skip this step.)
 
 ---
 

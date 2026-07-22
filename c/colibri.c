@@ -6666,7 +6666,7 @@ int main(int argc, char **argv){
         fprintf(stderr,
           "ERROR: no PROMPT given, so this is oracle self-test mode — but ref_glm.json is the TINY\n"
           "       model's oracle (max token %d) and your model's vocab is %d. Nothing to validate here.\n"
-          "         Engine self-test:  SNAP=./glm_tiny TF=1 ./glm 64 16 16      (expect 32/32)\n"
+          "         Engine self-test:  SNAP=./glm_tiny TF=1 ./glm 64 16 16      (expect ~30-32/32; FP near-ties are toolchain-dependent)\n"
           "         Real generation:   PROMPT=\"Hello\" NGEN=32 SNAP=<model> ./glm 64\n"
           "         or:                python coli chat --model <model>\n"
           "         REF_FORCE=1 to run the comparison anyway (meaningless).\n"

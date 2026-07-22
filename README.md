@@ -157,8 +157,9 @@ math on the unified-memory GPU.
 
 ### Faithful model, compressed state
 
-The forward pass is validated **token-exact against a `transformers` oracle**
-(teacher-forcing 32/32). MLA attention stores a compressed KV state — 576
+The forward pass is validated against a `transformers` oracle (teacher-forcing
+typically 30-32/32; two tiny-oracle positions are floating-point near-ties and
+toolchain-dependent). MLA attention stores a compressed KV state — 576
 floats/token instead of 32,768 (**57× smaller**) — and persists it across
 restarts (`.coli_kv`): conversations reopen warm with zero re-prefill,
 byte-identical to an uninterrupted session. DSA sparse attention (GLM-5.2's

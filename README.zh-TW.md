@@ -101,9 +101,10 @@ VRAM／RAM／硬碟層級長條，以及角落的即時迷你大腦。</em></p>
 
 ### 忠實模型，壓縮狀態
 
-前向傳遞已透過 `transformers` oracle 驗證為**逐 token 完全一致**
-（teacher-forcing 32/32）。MLA 注意力儲存壓縮後的 KV 狀態——每個 token 為 576 個
-浮點數，而非 32,768 個（**縮小 57×**）——並跨重新啟動持久保存
+前向傳遞已透過 `transformers` oracle 驗證（teacher-forcing 通常為
+30-32/32；tiny oracle 中有兩個位置是浮點數近似平手，結果會受工具鏈影響）。
+MLA 注意力儲存壓縮後的 KV 狀態——每個 token 為 576 個浮點數，而非 32,768 個
+（**縮小 57×**）——並跨重新啟動持久保存
 （`.coli_kv`）：對話可暖啟恢復，不需重新 prefill，結果與不中斷的工作階段
 逐位元組相同。DSA 稀疏注意力（GLM-5.2 的 lightning indexer）已忠實實作，
 並透過強制選取所有 key，驗證可精確重現稠密注意力。

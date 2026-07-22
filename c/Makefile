@@ -199,9 +199,27 @@ else
 PYTHON    ?= python3
 endif
 CUDA_OBJ  =
+
+# DeepSeek V4 is a separate x86-64 runtime. Portable infrastructure tests run
+# everywhere; the engine and token-exact fixture run only on Linux/Windows.
+COLI_V4_SUPPORTED :=
+ifneq (,$(X86_64))
+ifneq (,$(IS_WIN)$(LINUX))
+COLI_V4_SUPPORTED := 1
+endif
+endif
+
+V4_INFRA_TEST_BINS = tests/test_expert_store_ops$(EXE) \
+	tests/test_safetensors_index$(EXE) tests/test_native_quant$(EXE) \
+	tests/test_tensor_io$(EXE)
 TEST_BINS = tests/test_json$(EXE) tests/test_st$(EXE) tests/test_st_mirror$(EXE) tests/test_st_pread$(EXE) tests/test_tier$(EXE) tests/test_grammar$(EXE) tests/test_schema_gbnf$(EXE) tests/test_decode_batch$(EXE) tests/test_idot$(EXE) tests/test_i4_grouped$(EXE) tests/test_stops$(EXE) tests/test_topp$(EXE) tests/test_sample_nan$(EXE) tests/test_temp_env$(EXE) tests/test_tok_o200k$(EXE) tests/test_kv_alloc$(EXE) tests/test_int3$(EXE) tests/test_int3_load$(EXE) tests/test_i4_acc512$(EXE) tests/test_compat_direct$(EXE) tests/test_dsa_select$(EXE) tests/test_logit_nan$(EXE) tests/test_pipe_block$(EXE) tests/test_e8_kernel$(EXE)
+TEST_BINS += $(V4_INFRA_TEST_BINS)
 ifneq (,$(LINUX))
 TEST_BINS += tests/test_uring$(EXE)
+endif
+ifeq ($(COLI_V4_SUPPORTED),1)
+TEST_BINS += tests/test_deepseek_v4$(EXE) tests/test_v4_ownership$(EXE) \
+	tests/test_v4_config_dspark_compat$(EXE)
 endif
 
 # Windows CUDA DLL path: host links the loader, NOT cudart.
@@ -256,6 +274,41 @@ METAL_OBJ = backend_metal.o
 endif
 
 all: colibri$(EXE)
+
+.PHONY: deepseek-v4 deepseek-v4-oracle deepseek-v4-tiny-check deepseek-v4-clean
+ifeq ($(COLI_V4_SUPPORTED),1)
+deepseek-v4:
+	$(MAKE) -f Makefile.deepseek-v4 ARCH=$(ARCH) deepseek-v4
+
+deepseek-v4-clean:
+	$(MAKE) -f Makefile.deepseek-v4 deepseek-v4-clean
+
+deepseek-v4-tiny-check:
+	$(MAKE) -f Makefile.deepseek-v4 deepseek-v4-clean
+	$(MAKE) -f Makefile.deepseek-v4 ARCH=$(if $(strip $(ARCH)),$(ARCH),$(PORTABLE_ARCH)) deepseek-v4
+	$(PYTHON) tests/test_deepseek_v4_tiny.py \
+		--binary ./$(if $(IS_WIN),deepseek_v4.exe,deepseek_v4) \
+		--fixture ./deepseek_v4_tiny
+
+deepseek-v4-oracle: deepseek-v4
+	@test -n "$(MODEL)" || { echo "usage: make deepseek-v4-oracle MODEL=/path/to/checkpoint" >&2; exit 2; }
+	$(PYTHON) tools/make_deepseek_v4_oracle.py --model "$(MODEL)" \
+		--binary ./$(if $(IS_WIN),deepseek_v4.exe,deepseek_v4) \
+		--output tests/deepseek_v4_oracle.json \
+		--memory-gb $(or $(MEMORY_GB),32) \
+		--prompt "$(or $(ORACLE_PROMPT),The capital of France is)" \
+		--validate \
+		--teacher-forcing $(or $(ORACLE_TEACHER_FORCING),32) \
+		--greedy $(or $(ORACLE_GREEDY),20) \
+		--check-dspark
+else
+deepseek-v4 deepseek-v4-oracle:
+	@echo "$@ is supported only on x86-64 Linux and Windows/MSYS2" >&2; exit 1
+deepseek-v4-clean:
+	@:
+deepseek-v4-tiny-check:
+	@echo "SKIP deepseek-v4-tiny-check: V4 runtime requires x86-64 Linux or Windows/MSYS2"
+endif
 
 # phony targets — 'glm' kept for backward compatibility
 colibri: colibri$(EXE)
@@ -427,6 +480,71 @@ tests/test_i4_acc512$(EXE): tests/test_i4_acc512.c
 tests/test_compat_direct$(EXE): tests/test_compat_direct.c compat.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+tests/test_expert_store_ops$(EXE): tests/test_expert_store_ops.c expert_store.h tensor.h
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+tests/test_safetensors_index$(EXE): tests/test_safetensors_index.c safetensors_index.c safetensors_index.h json.h
+	$(CC) $(CFLAGS) safetensors_index.c $< -o $@ $(LDFLAGS)
+
+tests/test_native_quant$(EXE): tests/test_native_quant.c native_quant.c native_quant.h tensor.h
+	$(CC) $(CFLAGS) native_quant.c $< -o $@ $(LDFLAGS)
+
+tests/test_tensor_io$(EXE): tests/test_tensor_io.c tensor_io.c tensor_io.h native_quant.c native_quant.h safetensors_index.c safetensors_index.h tensor.h json.h
+	$(CC) $(CFLAGS) safetensors_index.c native_quant.c tensor_io.c $< \
+		-o $@ $(LDFLAGS)
+
+ifeq ($(COLI_V4_SUPPORTED),1)
+include Makefile.deepseek-v4.units
+V4_TEST_LINK_OBJS = \
+	COLI_V4_UNIT_MATH.o \
+	COLI_V4_UNIT_SPARSE_ATTENTION.o \
+	COLI_V4_UNIT_RESOURCE_PLAN.o \
+	COLI_V4_UNIT_PROMPT.o \
+	$(addsuffix .o,$(V4_TEST_UNITS)) \
+	safetensors_index.o native_quant.o
+
+tests/test_deepseek_v4$(EXE): tests/test_deepseek_v4.c deepseek_v4.c deepseek_v4.h \
+		deepseek_v4_dspark.h Makefile.deepseek-v4.units
+	$(MAKE) -f Makefile.deepseek-v4 ARCH=$(ARCH) deepseek-v4-test-objs \
+		COLI_V4_UNIT_MATH.o COLI_V4_UNIT_SPARSE_ATTENTION.o \
+		COLI_V4_UNIT_RESOURCE_PLAN.o COLI_V4_UNIT_PROMPT.o \
+		safetensors_index.o
+	$(CC) $(CFLAGS) native_quant.c -c -o native_quant.o
+	$(CC) $(CFLAGS) $< $(V4_TEST_LINK_OBJS) -o $@ -pthread $(LDFLAGS)
+
+V4_OWN_DIR = build/ownership
+V4_OWN_CFLAGS = $(CFLAGS) -DCOLI_V4_TEST_HOOKS
+V4_OWNERSHIP_OBJS = \
+	$(V4_OWN_DIR)/COLI_V4_UNIT_RUNTIME.o \
+	$(V4_OWN_DIR)/COLI_V4_UNIT_CONFIG.o \
+	$(V4_OWN_DIR)/safetensors_index.o
+
+$(V4_OWN_DIR):
+	mkdir -p $(V4_OWN_DIR)
+
+$(V4_OWN_DIR)/COLI_V4_UNIT_RUNTIME.o: deepseek_v4.c deepseek_v4.h deepseek_v4_internal.h | $(V4_OWN_DIR)
+	$(CC) $(V4_OWN_CFLAGS) -DCOLI_V4_UNIT_RUNTIME -c deepseek_v4.c -o $@
+
+$(V4_OWN_DIR)/COLI_V4_UNIT_CONFIG.o: deepseek_v4.c deepseek_v4.h deepseek_v4_internal.h | $(V4_OWN_DIR)
+	$(CC) $(V4_OWN_CFLAGS) -DCOLI_V4_UNIT_CONFIG -c deepseek_v4.c -o $@
+
+$(V4_OWN_DIR)/safetensors_index.o: safetensors_index.c safetensors_index.h | $(V4_OWN_DIR)
+	$(CC) $(CFLAGS) -c safetensors_index.c -o $@
+
+tests/test_v4_ownership$(EXE): tests/test_v4_ownership.c $(V4_OWNERSHIP_OBJS)
+	$(CC) $(V4_OWN_CFLAGS) $< $(V4_OWNERSHIP_OBJS) -o $@ -pthread $(LDFLAGS)
+
+COLI_V4_UNIT_CONFIG_DSPARK_COMPAT.o: deepseek_v4_dspark.c deepseek_v4.h \
+		deepseek_v4_dspark.h deepseek_v4_internal.h Makefile.deepseek-v4
+	$(MAKE) -f Makefile.deepseek-v4 ARCH=$(ARCH) $@
+
+tests/test_v4_config_dspark_compat$(EXE): \
+		tests/test_v4_config_dspark_compat.c \
+		COLI_V4_UNIT_CONFIG_DSPARK_COMPAT.o
+	$(CC) $(CFLAGS) $< COLI_V4_UNIT_CONFIG_DSPARK_COMPAT.o \
+		-o $@ $(LDFLAGS)
+endif
+
 tests/test_dsa_select$(EXE): tests/test_dsa_select.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h quant.h sample.h kv_persist.h telemetry.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
@@ -458,6 +576,7 @@ test-python:
 	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'
 
 test: test-c test-python
+	$(MAKE) deepseek-v4-tiny-check
 
 # --- Efficiency / regression suite (issue: "test the program for inefficiencies") ---
 # The tiny-model assertions live in test_inefficiency.py and run as part of
@@ -507,4 +626,5 @@ clean:
 
 bench: iobench$(EXE)
 	@if [ -n "$(ARGS)" ]; then ./iobench$(EXE) $(ARGS); else echo "built iobench$(EXE) — run: ./iobench$(EXE) <file> <MB> <iters> <threads> <direct 0|1>"; fi
-.PHONY: all colibri glm cuda-test hip-test gpu-compile cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench
+.PHONY: all colibri glm deepseek-v4 deepseek-v4-clean deepseek-v4-oracle deepseek-v4-tiny-check \
+	cuda-test hip-test gpu-compile cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench

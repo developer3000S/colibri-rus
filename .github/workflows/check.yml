@@ -9,18 +9,32 @@ on:
   pull_request:
     branches: [main, dev]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+
 jobs:
   linux:
+    name: Linux (colibri + tiny V4 oracle)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: make check
+      - name: make check (includes tiny V4 oracle)
         run: make -C c check
 
   windows:
     # The job that would have caught #68/#137 pre-merge: native MinGW-w64
     # (MSYS2/UCRT64), the exact toolchain the README's Windows port targets.
+    name: Windows UCRT64 (colibri + tiny V4 oracle)
     runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         shell: msys2 {0}
@@ -34,16 +48,18 @@ jobs:
             make
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-python
-      - name: make check
+      - name: make check (includes tiny V4 oracle)
         run: make -C c check
 
   macos:
     # clang; libomp for the threaded path (Makefile falls back to
     # single-threaded automatically if it's ever missing).
+    name: macOS (colibri + V4 platform gate)
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: install libomp
         run: brew install libomp
-      - name: make check
+      - name: make check (V4 execution gated off)
         run: make -C c check

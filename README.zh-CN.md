@@ -217,6 +217,23 @@ COLI_MODEL=/nvme/glm52_i4 ./coli doctor   # 只读就绪检查
 | 语法强制草稿（结构化输出） | [docs/grammar-draft.md](docs/grammar-draft.md) |
 | 环境变量完整清单 | [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) |
 
+## DeepSeek V4
+
+实验性的 **DeepSeek V4 Flash + DSpark** CPU 路径使用原生 FP4 专家、
+自动 RAM 规划和无损推测验证。目前支持 x86-64 Linux 与 Windows／MSYS2；
+其他平台仍通过 `make check` 验证 colibri 主引擎。
+
+```bash
+cd c
+make deepseek-v4
+python ./v4 run --model /path/to/DeepSeek-V4-Flash-DSpark --ram 32 \
+  --stop-sentence "What is the capital of France?"
+```
+
+状态、benchmark、checkpoint 验证和已提交的 tiny 独立 oracle 说明，
+请参阅[中文版 DeepSeek V4 文档](docs/deepseek-v4.zh-CN.md)；
+英文原文见 [docs/deepseek-v4.md](docs/deepseek-v4.md)。
+
 ## 支持项目
 
 colibrì 最初由一人使用 12 核心、25 GB RAM 的笔记本开发；
@@ -247,7 +264,7 @@ c/
 └── tests/                零依赖的 C 与 Python 测试
 web/                      浏览器 UI（纯 OpenAI API client）
 desktop/                  封装网页 UI 的 Tauri v2 桌面 shell
-docs/                     参考文档、实验与媒体文件
+docs/                     参考文档、实验、媒体文件与 DeepSeek V4 说明
 ```
 
 运行时路径刻意保持扁平、易读：`colibri.c` 加上若干头文件。

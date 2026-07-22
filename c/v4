@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""DeepSeek V4 command-line launcher for colibri."""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+EXE = ".exe" if sys.platform == "win32" else ""
+ENGINE = os.path.join(HERE, "deepseek_v4" + EXE)
+
+BOS = "<\uff5cbegin\u2581of\u2581sentence\uff5c>"
+USER = "<\uff5cUser\uff5c>"
+ASSISTANT = "<\uff5cAssistant\uff5c>"
+EOS = "<\uff5cend\u2581of\u2581sentence\uff5c>"
+
+
+def configure_stdio_utf8():
+    """Make PowerShell / Windows consoles accept Chinese input and output."""
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ.setdefault("PYTHONUTF8", "1")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleCP(65001)
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except (AttributeError, OSError):
+            pass
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def positive_int(text):
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return value
+
+
+def positive_float(text):
+    value = float(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return value
+
+
+def validate_model(model):
+    if not os.path.isdir(model):
+        raise SystemExit(f"model not found: {model}")
+    config_path = os.path.join(model, "config.json")
+    tokenizer_path = os.path.join(model, "tokenizer.json")
+    if not os.path.isfile(config_path):
+        raise SystemExit(f"config.json is missing from {model}")
+    if not os.path.isfile(tokenizer_path):
+        raise SystemExit(f"tokenizer.json is missing from {model}")
+    try:
+        with open(config_path, "r", encoding="utf-8") as stream:
+            config = json.load(stream)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"cannot read {config_path}: {error}") from error
+    architectures = config.get("architectures") or []
+    is_v4 = config.get("model_type") == "deepseek_v4" or any(
+        str(name).startswith("DeepseekV4") for name in architectures
+    )
+    if not is_v4:
+        raise SystemExit(f"model is not a DeepSeek V4 checkpoint: {model}")
+
+
+def validate_engine():
+    if not os.path.isfile(ENGINE):
+        raise SystemExit(
+            "DeepSeek V4 engine is not built. Run: make deepseek-v4"
+        )
+
+
+def new_history(system_prompt):
+    return BOS + (system_prompt or "")
+
+
+def turn_prompt(history, message, thinking):
+    prefix = "<think>" if thinking else "</think>"
+    return history + USER + message + ASSISTANT + prefix
+
+
+def completed_history(prompt, answer):
+    return prompt + answer + EOS
+
+
+def engine_command(args, prompt=None, raw=True, prompt_file=None):
+    command = [ENGINE, os.path.abspath(args.model)]
+    if prompt_file:
+        command.extend(("--prompt-file", prompt_file))
+    elif prompt is not None:
+        command.append(prompt)
+    else:
+        raise ValueError("prompt or prompt_file is required")
+    command.extend(("--max-tokens", str(args.ngen)))
+    if raw:
+        command.append("--raw-prompt")
+    if args.ram:
+        command.extend(("--memory-gb", f"{args.ram:g}"))
+    if getattr(args, "stop_sentence", False):
+        command.append("--stop-sentence")
+    return command
+
+
+def write_prompt_file(prompt):
+    handle = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".txt",
+        delete=False,
+        newline="\n",
+    )
+    try:
+        handle.write(prompt)
+        handle.flush()
+        return handle.name
+    finally:
+        handle.close()
+
+
+def compact_stats(log):
+    fields = []
+    memory = re.search(
+        r"ram_tiers available=([0-9.]+)GiB .* projected=([0-9.]+)GiB", log
+    )
+    prefill = re.search(
+        r"prefill_timing .* wall_to_first=([0-9.]+)s "
+        r"target_tok_s=[0-9.]+ combined_tok_s=([0-9.]+)", log
+    )
+    decode = re.search(r"decode_timing tokens=(\d+) seconds=[0-9.]+ tok_s=([0-9.]+)", log)
+    summary = re.search(
+        r"dspark_rounds=\d+ proposed=(\d+) accepted=(\d+) rate=([0-9.]+)", log
+    )
+    if memory:
+        fields.append(f"RAM {float(memory.group(2)):.2f}/{float(memory.group(1)):.2f} GiB")
+    if prefill:
+        fields.append(f"TTFT {float(prefill.group(1)):.2f}s")
+        fields.append(f"prefill {float(prefill.group(2)):.3f} tok/s")
+    if decode:
+        fields.append(f"decode {float(decode.group(2)):.3f} tok/s")
+    if summary and int(summary.group(1)):
+        fields.append(f"DSpark acceptance {100.0 * float(summary.group(3)):.1f}%")
+    return " | ".join(fields)
+
+
+def emit_text(text):
+    """Write Unicode text through the UTF-8 text stream when possible."""
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        return
+    except UnicodeEncodeError:
+        pass
+    sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
+    sys.stdout.buffer.flush()
+
+
+def emit_bytes(chunk):
+    """Stream engine UTF-8 bytes; decode via text stdout after UTF-8 setup."""
+    try:
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
+    except (AttributeError, OSError, ValueError):
+        emit_text(chunk.decode("utf-8", errors="replace"))
+
+
+def generate(args, prompt, raw=True, stream=True):
+    validate_model(args.model)
+    validate_engine()
+    # Always pass the prompt through a UTF-8 file. Windows argv uses the ANSI
+    # code page for MinGW main(), which corrupts Chinese from PowerShell.
+    prompt_path = write_prompt_file(prompt)
+    try:
+        with tempfile.TemporaryFile(mode="w+b") as error_log:
+            process = subprocess.Popen(
+                engine_command(args, raw=raw, prompt_file=prompt_path),
+                stdout=subprocess.PIPE,
+                stderr=error_log,
+                bufsize=0,
+            )
+            chunks = []
+            while True:
+                chunk = process.stdout.read(256)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if stream:
+                    emit_bytes(chunk)
+            return_code = process.wait()
+            error_log.seek(0)
+            diagnostics = error_log.read().decode("utf-8", errors="replace")
+    finally:
+        try:
+            os.unlink(prompt_path)
+        except OSError:
+            pass
+    answer = b"".join(chunks).decode("utf-8", errors="replace").rstrip("\r\n")
+    if return_code:
+        tail = "\n".join(diagnostics.rstrip().splitlines()[-12:])
+        raise SystemExit(tail or f"DeepSeek V4 engine exited with status {return_code}")
+    return answer, diagnostics
+
+
+def cmd_run(args):
+    prompt = " ".join(args.prompt).strip()
+    if not prompt:
+        raise SystemExit('usage: v4 run --model PATH "your prompt"')
+    _, diagnostics = generate(args, prompt, raw=False)
+    stats = compact_stats(diagnostics)
+    if stats:
+        print(f"[stats] {stats}", file=sys.stderr)
+    return 0
+
+
+def cmd_chat(args):
+    validate_model(args.model)
+    validate_engine()
+    history = new_history(args.system)
+    ram_label = f"{args.ram:g} GiB" if args.ram else "auto"
+    print(f"DeepSeek V4 chat | {os.path.basename(os.path.normpath(args.model))} | RAM {ram_label}")
+    print("Commands: :reset clears history, :q exits.")
+    print("Note: conversation history is re-prefilled on each turn.\n")
+    while True:
+        try:
+            message = input("You> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not message:
+            continue
+        if message in (":q", ":quit", ":exit"):
+            break
+        if message == ":reset":
+            history = new_history(args.system)
+            print("History cleared.\n")
+            continue
+        prompt = turn_prompt(history, message, args.thinking)
+        print("Assistant> ", end="", flush=True)
+        answer, diagnostics = generate(args, prompt, raw=True)
+        history = completed_history(prompt, answer)
+        stats = compact_stats(diagnostics)
+        if stats:
+            print(f"[stats] {stats}", file=sys.stderr)
+        print()
+    return 0
+
+
+def add_runtime_arguments(parser):
+    parser.add_argument("--model", required=True, help="DeepSeek V4 model directory")
+    parser.add_argument("--ram", type=positive_float, default=0, metavar="GIB",
+                        help="process RAM limit in GiB (default: auto)")
+    parser.add_argument("--ngen", type=positive_int, default=128, metavar="N",
+                        help="maximum response tokens (default: 128)")
+
+
+def make_parser():
+    parser = argparse.ArgumentParser(
+        prog="v4", description="run DeepSeek V4 Flash locally with colibri"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    chat = subparsers.add_parser("chat", help="interactive multi-turn chat")
+    add_runtime_arguments(chat)
+    chat.add_argument("--system", default="", help="system message")
+    chat.add_argument("--thinking", action="store_true", help="enable thinking mode")
+    chat.set_defaults(handler=cmd_chat)
+
+    run = subparsers.add_parser("run", help="one-shot generation")
+    add_runtime_arguments(run)
+    run.add_argument("--stop-sentence", action="store_true",
+                     help="stop at the first sentence terminator")
+    run.add_argument("prompt", nargs="*")
+    run.set_defaults(handler=cmd_run)
+    return parser
+
+
+def main():
+    configure_stdio_utf8()
+    args = make_parser().parse_args()
+    return args.handler(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -30,6 +30,17 @@ c/tests/test_*
 !c/tests/test_*.cu
 !c/tests/test_*.mm
 !c/tests/test_*.py
+c/deepseek_v4
+c/deepseek_v4.exe
+c/COLI_V4_UNIT_*.o
+c/safetensors_index.o
+c/tensor_io.o
+c/native_quant.o
+c/native_quant_parallel.o
+c/native_quant_dual.o
+c/native_quant_batch_avx512.o
+c/native_quant_fp4_rows16.o
+c/build/ownership/
 result
 
 # oracoli tiny generati (make_glm_oracle.py) e dati benchmark scaricati
@@ -39,9 +50,13 @@ c/glm_tiny_i4/
 c/glm_tiny_mix/
 c/glm_bench_medium/
 c/bench/
+c/tests/deepseek_v4_oracle.json
+c/tests/deepseek_v4_oracle.tmp_ids.json
 
 # pesi modello / artefatti di run
 *.safetensors
+!c/deepseek_v4_tiny/model.safetensors
+!c/deepseek_v4_tiny/dspark/model.safetensors
 stats*.txt
 *.log
 
@@ -68,3 +83,5 @@ olmoe_merged/
 olmoe_i4/
 c/olmoe_merged/
 c/olmoe_i4/
+.venv*/
+.bench/

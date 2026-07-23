@@ -177,13 +177,20 @@ static void stats_dump_q(Model *m, const char *path, int quiet){
 static void stats_dump(Model *m, const char *path){ stats_dump_q(m,path,0); }
 
 static char g_usage_path[2100]="";
+static int colibri_persist_enabled(void){
+    const char *v=getenv("COLI_PERSIST");
+    if(!v || !*v) return 1;
+    if(!strcmp(v,"0") || !strcmp(v,"false") || !strcmp(v,"False") || !strcmp(v,"off") || !strcmp(v,"OFF")) return 0;
+    return 1;
+}
 static int64_t usage_load(Model *m, const char *path){
+    if(!colibri_persist_enabled()) return 0;
     FILE *f=fopen(path,"r"); if(!f) return 0;
     Cfg *c=&m->c; int l,e; uint32_t cnt; int64_t tot=0;
     while(fscanf(f,"%d %d %u",&l,&e,&cnt)==3)
         if(l>=0&&l<=c->n_layers&&e>=0&&e<c->n_experts&&m->eusage[l]){ m->eusage[l][e]+=cnt; tot+=cnt; }
     fclose(f); return tot;
 }
-static void usage_save(Model *m){ if(g_usage_path[0]) stats_dump_q(m,g_usage_path,1); }
+static void usage_save(Model *m){ if(!colibri_persist_enabled()) return; if(g_usage_path[0]) stats_dump_q(m,g_usage_path,1); }
 
 #endif /* TELEMETRY_H */

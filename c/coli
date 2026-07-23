@@ -219,6 +219,14 @@ def env_for(a):
                                                         # COLI_TEMP, non TEMP: ROCm e Windows leggono $TEMP come dir temporanea (#509)
     if a.repin: e["REPIN"]=str(a.repin)
     if a.ctx: e["CTX"]=str(a.ctx)
+    if getattr(a, "no_kv_save", False):
+        e["KVSAVE"] = "0"
+    if getattr(a, "no_autopin", False):
+        e["AUTOPIN"] = "0"
+    if getattr(a, "no_persist", False):
+        e["KVSAVE"] = "0"
+        e["AUTOPIN"] = "0"
+        e["COLI_PERSIST"] = "0"
     if a.auto_tier:
         from resource_plan import build_plan, environment_for_plan, format_bytes
         if a.gpu is not None:
@@ -959,6 +967,12 @@ def main():
     common.add_argument("--policy",choices=("quality","balanced","experimental-fast"),
                         default=os.environ.get("COLI_POLICY","quality"),
                         help="resource policy (explicit --topk/--topp overrides warn and proceed)")
+    common.add_argument("--no-kv-save",action="store_true",
+                        help="disable .coli_kv persistence for chat/serve and reduce SSD writes")
+    common.add_argument("--no-autopin",action="store_true",
+                        help="disable automatic hot-store pinning from usage history")
+    common.add_argument("--no-persist",action="store_true",
+                        help="disable runtime KV and usage-history persistence to reduce SSD writes")
     common.add_argument("--repin", type=int, default=0, help="adapt RAM/VRAM experts every N tokens")
     common.add_argument("--cap", type=int, default=8); common.add_argument("--ngen", type=int, default=1024)  # rete di sicurezza: la fine vera la decidono gli stop token
     common.add_argument("--topp", type=float, default=0); common.add_argument("--topk", type=int, default=0)

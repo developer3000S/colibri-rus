@@ -203,6 +203,7 @@ TEST_BINS = tests/test_json$(EXE) tests/test_st$(EXE) tests/test_st_mirror$(EXE)
 ifneq (,$(LINUX))
 TEST_BINS += tests/test_uring$(EXE)
 TEST_BINS += tests/test_rammap$(EXE)
+TEST_BINS += tests/test_resource_masks$(EXE)
 endif
 
 # Windows CUDA DLL path: host links the loader, NOT cudart.
@@ -468,6 +469,9 @@ tests/test_uring$(EXE): tests/test_uring.c colibri.c st.h uring.h json.h tok.h t
 tests/test_rammap$(EXE): tests/test_rammap.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h quant.h sample.h kv_persist.h telemetry.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+tests/test_resource_masks$(EXE): tests/test_resource_masks.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h quant.h sample.h kv_persist.h telemetry.h
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
 tests/test_pipe_block$(EXE): tests/test_pipe_block.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
@@ -513,13 +517,16 @@ install: colibri$(EXE) olmoe$(EXE)
 	$(INSTALL) -d $(DESTDIR)$(LIBEXECDIR)
 	$(INSTALL) -d $(DESTDIR)$(LIBEXECDIR)/tools
 	$(INSTALL) -m 755 coli $(DESTDIR)$(BINDIR)/coli
+	printf '%s\n' '$(LIBEXECDIR)' > '$(DESTDIR)$(BINDIR)/coli.libexec'
+	chmod 644 '$(DESTDIR)$(BINDIR)/coli.libexec'
 	$(INSTALL) -m 755 colibri$(EXE) $(DESTDIR)$(LIBEXECDIR)/colibri$(EXE)
 	$(INSTALL) -m 755 olmoe$(EXE) $(DESTDIR)$(LIBEXECDIR)/olmoe$(EXE)
-	$(INSTALL) -m 644 resource_plan.py doctor.py openai_server.py version.py ramdisk.py $(DESTDIR)$(LIBEXECDIR)/
+	$(INSTALL) -m 644 resource_plan.py doctor.py openai_server.py version.py ramdisk.py ramdisk_ui.py ramdisk_textual.py requirements-tui.txt $(DESTDIR)$(LIBEXECDIR)/
 	$(INSTALL) -m 644 tools/*.py $(DESTDIR)$(LIBEXECDIR)/tools/
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/coli
+	rm -f $(DESTDIR)$(BINDIR)/coli.libexec
 	rm -rf $(DESTDIR)$(LIBEXECDIR)
 
 clean:

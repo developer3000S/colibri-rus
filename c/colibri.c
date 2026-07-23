@@ -4555,7 +4555,12 @@ static int spec_decode(Model *m, int *all, int kv, int n_new, int eos, float *lo
         if((eos>=0 && next==eos) || is_stop(next)) break;
         emit(next,ud); all[kv]=next; emitted++; m->n_emit++;
         gr_feed(&g_grd,next);                           /* il walker segue l'output emesso */
-        if(emitted>=n_new) break;                       /* l'ultimo token non serve forwardarlo */
+        /* One-shot generation does not need logits or KV for the last token.
+         * Stateful callers do: their kv_out becomes chat history, feeds MORE,
+         * and is persisted to .coli_kv.  Let those callers take the normal
+         * g=0 step_all path below so the final token is really committed; just
+         * incrementing kv would serialize an uninitialized KV row. */
+        if(emitted>=n_new && !kv_out) break;
         int g = 0, gsrc = 0;                            /* sorgente: 1=grammatica 2=MTP/n-gram */
         if(g_grd.on){                                   /* metodo F: prima la grammatica — dove
                                                          * forza, l'acceptance e' ~1 (#48) */

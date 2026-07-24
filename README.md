@@ -294,6 +294,7 @@ individual DIMMs/channels are inventory, not allocation targets.
 | Grammar-forced drafts (structured output) | [docs/grammar-draft.md](docs/grammar-draft.md) |
 | Environment variable inventory | [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) |
 | CLI flags and RAM-disk lifecycle commands | [docs/SETTINGS.md](docs/SETTINGS.md) |
+| Shared full-model RAM-workspace TUI how-to | [docs/ramdisk-tui-howto.md](docs/ramdisk-tui-howto.md) |
 | RAM-workspace TUI operator and developer guide | [docs/ramdisk-tui.md](docs/ramdisk-tui.md) |
 
 ## Development checks

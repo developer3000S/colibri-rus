@@ -264,7 +264,7 @@ typedef struct {
 
 #include "quant.h"
 static int64_t qt_scale_bytes(const QT *t){
-    if(t->fmt==0) return 0;
+    if(t->fmt==0 || t->fmt==6) return 0;   /* f32 / E8: no separate scale array */
     if(t->fmt==4){
         if(t->gs<=0) return 0;
         return (int64_t)t->O*(((int64_t)t->I+t->gs-1)/t->gs)*(int64_t)sizeof(float);

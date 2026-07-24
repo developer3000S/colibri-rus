@@ -56,9 +56,11 @@ int main(void){
 #else
     QT grouped={.fmt=4,.O=2,.I=129,.gs=64};
     QT int3={.fmt=5,.O=2,.I=65};
+    QT e8={.fmt=6,.O=2,.I=257};
     if(qt_scale_bytes(&grouped)!=24 || qt_scale_bytes(&int3)!=16 ||
-       qt_bytes(&int3)-qt_scale_bytes(&int3)!=96)
-        return fail("grouped/int3 scale and weight byte geometry");
+       qt_bytes(&int3)-qt_scale_bytes(&int3)!=96 ||
+       qt_scale_bytes(&e8)!=0 || qt_bytes(&e8)-qt_scale_bytes(&e8)!=396)
+        return fail("grouped/int3/E8 scale and weight byte geometry");
     ProfPhysicalWire unavailable=prof_physical_wire(-1);
     ProfPhysicalWire measured_zero=prof_physical_wire(0);
     ProfPhysicalWire measured_bytes=prof_physical_wire(4096);

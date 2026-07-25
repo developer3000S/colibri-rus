@@ -53,6 +53,7 @@
 #include "tok.h"
 #include "tier.h"
 #include "grammar.h"                              /* metodo F: draft grammaticali (#48) */
+#include "abl.h"                                   /* per-expert causal-ablation harness — inert unless g_abl.mode set (ABLATE_SCORE=<manifest>) */
 #include "schema_gbnf.h"                          /* SCHEMA=: JSON-Schema -> GBNF for method F */
 #include "decode_batch.h"
 #ifdef _OPENMP
@@ -587,6 +588,9 @@ static float temp_from_env(const char *coli_temp, const char *temp){
 static float g_nuc=0.95f;/* NUCLEUS: top-p sul vocabolario (default dal generation_config GLM-5.2) */
 static int g_topk=0;     /* TOPK=n -> usa n expert/token invece di config (ricerca: meno disco) */
 static float g_topp=0;   /* TOPP=p (0..1) -> top-p adattivo: tieni gli expert fino a peso cumulato p */
+static Abl g_abl = {0};  /* per-expert causal-ablation config (per item). mode==0 -> the three moe()
+                          * hooks below are inert and output stays byte-identical to upstream.
+                          * Set only on the ABLATE_SCORE teacher-forced path (research instrument). */
 static int g_expert_budget=0; /* EXPERT_BUDGET=N -> cap distinct experts loaded per layer across the
                                * batch-union. Reduces disk I/O on cold/low-RAM hosts by dropping the
                                * lowest-gate-weight experts from the cross-position union. MoE-Spec
@@ -2896,6 +2900,25 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
             float tot=1e-20f; for(int kk=0;kk<Ksel;kk++) tot+=w[kk];
             float cum=0; for(int kk=0;kk<Ksel;kk++){ cum+=w[kk]; if(cum>=g_topp*tot){ Ke=kk+1; break; } }
         }
+        /* ===== CAUSAL ABLATION (FASE A) — inert unless g_abl.mode set this item.
+         * Both hooks act on the token's SELECTED set BEFORE the eusage/eheat/elast
+         * counters, norm_topk, routed_scale, and ROUTE_TRACE below, so the load
+         * counters, renormalised weights, and any route trace all reflect the
+         * post-ablation routing (route-around: the ablated cell truly did not fire;
+         * module-swap: the substitute fired at the original routed weight). */
+        if(g_abl.mode==2){                 /* route-around: drop ablated cells, survivors renormalise below */
+            int wr=0;
+            for(int kk=0;kk<Ke;kk++){
+                if(abl_route_around(&g_abl, layer, idx[kk])) continue;
+                idx[wr]=idx[kk]; w[wr]=w[kk]; wr++;
+            }
+            Ke=wr;
+        } else if(g_abl.mode==3){          /* module-swap: remap the slot's expert id, keep its weight */
+            for(int kk=0;kk<Ke;kk++){
+                int to=abl_swap_target(&g_abl, layer, idx[kk]);
+                if(to>=0) idx[kk]=to;
+            }
+        }
         keff[s]=Ke; m->ereq+=Ke;
         for(int kk=0;kk<Ke;kk++){
             m->eusage[layer][idx[kk]]++;
@@ -3316,6 +3339,11 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
             for(int s=0;s<S;s++) for(int kk=0;kk<keff[s];kk++)
                 if(idxs[(int64_t)s*K+kk]==eid){ rows[nr]=s; rw[nr]=ws[(int64_t)s*K+kk]; nr++; break; }
             if(!nr) continue;
+            /* CAUSAL ABLATION (FASE C, contribution mode): this expert's routing,
+             * counters, and any route trace were already recorded in FASE A; its
+             * weighted output is now replaced by ZERO -> skip its matmul+accumulate.
+             * CPU path only (the ablation harness runs the CPU forward). */
+            if(g_abl.mode==1 && abl_zero_contrib(&g_abl, layer, eid)) continue;
 #ifdef COLI_CUDA
             if(g_cuda_enabled && e->g.cuda_eligible) m->gpu_expert_calls++;
             if(group_enabled && g_cuda_enabled && e->g.cuda_eligible && e->u.cuda_eligible && e->d.cuda_eligible &&
@@ -4710,6 +4738,108 @@ static void run_score(Model *m, const char *snap, const char *path){
         if(++nreq%5==0) fprintf(stderr,"[score %d req | %.1fs | RSS %.2f GB | hit %.0f%%]\n",
             nreq, now_s()-t0, rss_gb(), (m->hits+m->miss)?100.0*m->hits/(m->hits+m->miss):0.0);
     }
+    free(ln); free(ids); free(x); free(lo); free(row); fclose(f);
+}
+
+/* ===========================================================================
+ * CAUSAL-ABLATION teacher-forced path.  Reached via ABLATE_SCORE=<manifest>;
+ * writes per-target-position final-logit summaries to ABLATE_OUT=<file> (JSONL).
+ * For each item it configures g_abl (mode + ablated (layer,expert) cells), runs
+ * ONE teacher-forced prefill (moe() applies the ablation), then reads out the
+ * FINAL logits at every target position -- the causal effect on the model's real
+ * output, not a logit lens.  If ROUTE_TRACE=<path> is also set, moe() dumps the
+ * POST-ablation router trace for free (the host correlates by manifest order).
+ *
+ * Manifest, one item per line, whitespace ints:
+ *     item  T  n_prompt  mode  ncells  (L E A){ncells}  t_0 .. t_{T-1}
+ *   item    = manifest item id (host joins to (corpus_item, condition, cell))
+ *   T       = seq length (prompt + teacher-forced target)
+ *   n_prompt= # prompt tokens; targets are positions [n_prompt, T)
+ *   mode    = 0 baseline | 1 contribution | 2 route-around | 3 module-swap
+ *   ncells  = # ablated cells (0 for baseline)
+ *   L E A   = layer, expert, swap-target (A=-1 unless mode 3), one triple per cell
+ *   t_*     = token ids (host pre-tokenised, prefix included if the model needs it)
+ * abl_reset() before each item makes the ablation PER-ITEM (an item's spec can
+ * never leak into the next). NLL/margin/correctness are exact; top-K is for a
+ * paired approximate next-token KL on the host. */
+#define ABL_LOGIT_TOPK 32
+static void run_ablate_score(Model *m, const char *path){
+    Cfg *c=&m->c; int D=c->hidden, V=c->vocab;
+    FILE *f=fopen(path,"rb"); if(!f){perror(path);exit(1);}
+    const char *outp=getenv("ABLATE_OUT");
+    FILE *of = outp ? fopen(outp,"wb") : NULL;
+    if(outp && !of){ fprintf(stderr,"[ablate] cannot open ABLATE_OUT=%s\n",outp); }
+    if(of) fprintf(of,"{\"t\":\"hdr\",\"schema\":\"coli-ablate/1\",\"vocab\":%d,\"topk\":%d}\n",V,ABL_LOGIT_TOPK);
+    int maxT=1; { char *ln=NULL; size_t cp=0;
+        while(getline(&ln,&cp,f)>0){ long id,T; char *e;
+            id=strtol(ln,&e,10); if(e==ln) continue; T=strtol(e,&e,10);
+            if(T>maxT) maxT=(int)T; (void)id; }
+        free(ln); }
+    kv_alloc(m,maxT);
+    float *x=falloc((int64_t)maxT*D), *lo=falloc(V), *row=falloc(D);
+    int *ids=malloc((size_t)maxT*sizeof(int));
+    int tk_id[ABL_LOGIT_TOPK]; float tk_val[ABL_LOGIT_TOPK];
+    rewind(f); char *ln=NULL; size_t cp=0; int nreq=0; double t0=now_s();
+    while(getline(&ln,&cp,f)>0){
+        char *p=ln, *e;
+        long item=strtol(p,&e,10); if(e==p) continue; p=e;                 /* blank line */
+        long T=strtol(p,&e,10);  if(e==p){ fprintf(stderr,"[ablate] bad T\n"); continue; } p=e;
+        long np=strtol(p,&e,10); if(e==p){ fprintf(stderr,"[ablate] bad n_prompt\n"); continue; } p=e;
+        long mode=strtol(p,&e,10); if(e==p){ fprintf(stderr,"[ablate] bad mode\n"); continue; } p=e;
+        long nc=strtol(p,&e,10);  if(e==p){ fprintf(stderr,"[ablate] bad ncells\n"); continue; } p=e;
+        int Ls[ABL_MAX_CELLS], Es[ABL_MAX_CELLS], As[ABL_MAX_CELLS];
+        int bad=0; long ncc = nc<0?0:(nc>ABL_MAX_CELLS?ABL_MAX_CELLS:nc);
+        for(long i=0;i<nc;i++){                                            /* read every triple; keep first ABL_MAX_CELLS */
+            long L=strtol(p,&e,10); if(e==p){bad=1;break;} p=e;
+            long E=strtol(p,&e,10); if(e==p){bad=1;break;} p=e;
+            long A=strtol(p,&e,10); if(e==p){bad=1;break;} p=e;
+            if(i<ncc){ Ls[i]=(int)L; Es[i]=(int)E; As[i]=(int)A; }
+        }
+        bad = bad || (T<1 || T>maxT || np<0 || np>T || mode<0 || mode>3);
+        for(long i=0;i<T && !bad;i++){ long v=strtol(p,&e,10); if(e==p){bad=1;break;} p=e;
+            if(v<0 || v>=V) bad=1; else ids[i]=(int)v; }
+        if(bad){ fprintf(stderr,"[ablate] ERR item %ld (bad field/token)\n",item); continue; }
+        /* PER-ITEM RESET then configure this item's ablation (no cross-item leak). */
+        abl_reset(&g_abl);
+        abl_set_item(&g_abl, (int)mode, Ls, Es, (mode==3?As:NULL), (int)ncc);
+        if(of){
+            fprintf(of,"{\"t\":\"ah\",\"item\":%ld,\"mode\":%ld,\"ncells\":%ld,\"T\":%ld,\"n_prompt\":%ld,\"cells\":[",
+                    item, mode, ncc, T, np);
+            for(int i=0;i<(int)ncc;i++) fprintf(of,"%s[%d,%d,%d]", i?",":"", Ls[i],Es[i],As[i]);
+            fprintf(of,"]}\n");
+        }
+        for(int s=0;s<T;s++) embed_row(m, ids[s], x+(int64_t)s*D);
+        layers_forward(m,x,(int)T,0);                                      /* ONE prefill; moe() applies g_abl */
+        /* FINAL-logit read-out at every target position pos in [np-1, T-1). */
+        if(of) for(long pos=(np>0?np-1:0); pos<T-1; pos++){
+            rmsnorm(row, x+(int64_t)pos*D, m->final_norm, D, c->eps);
+            matmul_qt(lo, row, &m->lm_head, 1);
+            int gold=ids[pos+1];
+            float mx=lo[0]; int am=0;
+            for(int i=1;i<V;i++){ if(lo[i]>mx){mx=lo[i];am=i;} }
+            double se=0; for(int i=0;i<V;i++) se+=exp((double)lo[i]-mx);
+            double logZ=(double)mx+log(se);
+            double gnll=logZ-(double)lo[gold];                             /* -log p(gold) */
+            float molo=-1e30f; for(int i=0;i<V;i++){ if(i!=gold && lo[i]>molo) molo=lo[i]; }
+            float mgn=lo[gold]-molo;                                       /* gold-vs-best-competitor logit margin */
+            for(int k=0;k<ABL_LOGIT_TOPK;k++){ tk_id[k]=-1; tk_val[k]=-1e30f; }
+            for(int i=0;i<V;i++){ float v=lo[i];
+                int mn=0; for(int k=1;k<ABL_LOGIT_TOPK;k++) if(tk_val[k]<tk_val[mn]) mn=k;
+                if(v>tk_val[mn]){ tk_val[mn]=v; tk_id[mn]=i; } }
+            fprintf(of,"{\"t\":\"lg\",\"item\":%ld,\"pos\":%ld,\"gold\":%d,\"nll\":%.6f,"
+                       "\"glogit\":%.6g,\"molo\":%.6g,\"mgn\":%.6g,\"am\":%d,\"amlogit\":%.6g,"
+                       "\"logZ\":%.6f,\"corr\":%d,\"tk\":[",
+                    item, pos, gold, gnll, (double)lo[gold], (double)molo, (double)mgn,
+                    am, (double)mx, logZ, (am==gold)?1:0);
+            for(int k=0;k<ABL_LOGIT_TOPK;k++) fprintf(of,"%s[%d,%.5g]", k?",":"", tk_id[k], (double)tk_val[k]);
+            fprintf(of,"]}\n");
+        }
+        if(of) fflush(of);
+        if(++nreq%8==0) fprintf(stderr,"[ablate %d item | %.1fs | RSS %.2f GB | hit %.0f%%]\n",
+            nreq, now_s()-t0, rss_gb(), (m->hits+m->miss)?100.0*m->hits/(m->hits+m->miss):0.0);
+    }
+    abl_reset(&g_abl);                                                     /* leave the engine in the OFF state */
+    if(of){ fflush(of); fclose(of); }
     free(ln); free(ids); free(x); free(lo); free(row); fclose(f);
 }
 
@@ -6648,6 +6778,12 @@ int main(int argc, char **argv){
       g_prof = getenv("PROF")?atoi(getenv("PROF")):0;   /* PROF=1: opt-in performance profile */
       if(g_prof) prof_config(&m, ram_env, est_ctx); }
     const char *stats=getenv("STATS");   /* STATS=<file> -> istogramma uso expert a fine run */
+
+    /* CAUSAL ABLATION: ABLATE_SCORE=<manifest> -> teacher-forced per-expert
+     * ablation sweep with per-target-position final-logit read-out (ABLATE_OUT=
+     * <file>). Precedes SCORE. Optional ROUTE_TRACE=<file> records the
+     * post-ablation router trace. */
+    if(getenv("ABLATE_SCORE")){ run_ablate_score(&m, getenv("ABLATE_SCORE")); if(stats) stats_dump(&m,stats); return 0; }
 
     /* modo scoring per benchmark: SCORE=<requests.txt> -> log-likelihood per riga */
     if(getenv("SCORE")){ run_score(&m, snap, getenv("SCORE")); if(stats) stats_dump(&m,stats); return 0; }

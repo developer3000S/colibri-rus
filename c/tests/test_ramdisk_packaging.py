@@ -444,7 +444,7 @@ class RamdiskPackagingTest(unittest.TestCase):
         self.assertIn('make -C c colibri ARCH="$ARCH"', flake)
         self.assertIn("cp c/colibri", flake)
         self.assertIn('COLI_ENGINE "$out/lib/colibri/colibri"', flake)
-        self.assertIn('program = "${colibri}/bin/glm";', flake)
+        self.assertIn('program = "${colibri}/bin/colibri";', flake)
         self.assertIn("nativeCheckInputs = [pythonEnv];", flake)
         self.assertIn("export PYTHONDONTWRITEBYTECODE=1", flake)
         self.assertIn("make test\n", flake)

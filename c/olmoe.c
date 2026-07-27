@@ -134,6 +134,7 @@ static void matmul(float *y, const float *x, const float *W, int S, int I, int O
         for (int s = 0; s < S; s++) {
             const float *xs = x + (int64_t)s * I;
             float acc = 0.f;
+            #pragma omp simd reduction(+:acc)
             for (int i = 0; i < I; i++) acc += xs[i] * w[i];
             y[(int64_t)s * O + o] = acc;
         }
@@ -158,9 +159,30 @@ static inline int32_t dot_i8_16(const int8_t *a, const int8_t *b) {
 #endif
     return vaddvq_s32(acc);
 }
+#define HAVE_FAST_DOT_I8 1
+#elif defined(__AVX2__)
+#include <immintrin.h>
+/* x86 counterpart of the NEON path above (was scalar-only here before —
+ * the only fast path was ARM, so x86 boxes silently used the scalar
+ * fallback even when AVX2 was available).
+ * Sign-extend both int8 vectors to int16 (exact, no precision loss) then
+ * madd+horizontal-sum in int32: pure integer arithmetic, so this is
+ * bit-for-bit identical to the scalar dot product, just vectorized. */
+static inline int32_t dot_i8_16(const int8_t *a, const int8_t *b) {
+    __m256i va16 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i*)a));
+    __m256i vb16 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i*)b));
+    __m256i prod = _mm256_madd_epi16(va16, vb16);           /* 8 x int32, adjacent pairs summed */
+    __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(prod), _mm256_extracti128_si256(prod, 1));
+    __m128i hi64   = _mm_unpackhi_epi64(sum128, sum128);
+    __m128i sum64  = _mm_add_epi32(sum128, hi64);
+    __m128i hi32   = _mm_shuffle_epi32(sum64, _MM_SHUFFLE(2, 3, 0, 1));
+    __m128i sum32  = _mm_add_epi32(sum64, hi32);
+    return _mm_cvtsi128_si32(sum32);
+}
+#define HAVE_FAST_DOT_I8 1
 #endif
 static void matmul_q(float *y, const float *x, const int8_t *q, const float *scale, int I, int O) {
-#if defined(__ARM_NEON)
+#if defined(HAVE_FAST_DOT_I8)
     static int idot = -1;
     if (idot < 0) { const char *e = getenv("IDOT"); idot = !(e && *e == '0'); }
     if (idot && I % 16 == 0 && I <= 4096) {
@@ -186,6 +208,7 @@ static void matmul_q(float *y, const float *x, const int8_t *q, const float *sca
     for (int o = 0; o < O; o++) {
         const int8_t *w = q + (int64_t)o * I;
         float acc = 0.f;
+        #pragma omp simd reduction(+:acc)
         for (int i = 0; i < I; i++) acc += x[i] * (float)w[i];
         y[o] = acc * scale[o];
     }

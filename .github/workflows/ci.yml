@@ -90,8 +90,23 @@ jobs:
           # link of the test binary below covers the single-source claim, and
           # the engine link is exercised on real ROCm hardware (GPU_BACKENDS.md).
           docker run --rm -v "$PWD":/src -w /src rocm/dev-ubuntu-24.04:6.2 bash -c '
-            apt-get update && apt-get install -y --no-install-recommends make gcc g++ &&
-            make -C c gpu-compile HIP=1 HIP_ARCH=gfx1100'
+            apt-get update && apt-get install -y --no-install-recommends make gcc g++ rocwmma-dev binutils &&
+            make -C c gpu-compile HIP=1 HIP_ARCH=gfx1100 &&
+            # The engine link is skipped here (see above), so assert the property
+            # that link needs instead: backend_cuda.o must be position-independent.
+            # hipcc emits a non-PIC/PIE object unless told otherwise, while gcc
+            # links -pie by default on the distros users build on, so absolute
+            # 32-bit relocations here mean `make HIP=1 colibri` dies with
+            #   R_X86_64_32 ... can not be used when making a PIE object
+            # That is exactly what happened before -fPIE was added to HIPCCFLAGS:
+            # this job stayed green over a HIP build that could not link at all,
+            # because gpu-compile links the TEST binary with the hipcc driver
+            # (PIC-agnostic) and never runs the gcc engine link. One readelf keeps
+            # that regression from silently coming back.
+            if readelf -r c/backend_cuda.o | grep -qE "R_X86_64_32S?"; then
+              echo "backend_cuda.o has absolute 32-bit relocations: the PIE link of colibri will fail (HIPCCFLAGS needs -fPIE or -fPIC)" >&2
+              exit 1
+            fi'
           echo "HIP syntax check passed"
 
   windows-cuda-build:

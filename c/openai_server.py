@@ -615,11 +615,14 @@ class ThinkingStreamSplit:
     """Split GLM's reasoning marker without leaking markers across stream chunks."""
     MARKERS = (THINK_OPEN, THINK_CLOSE)
 
-    def __init__(self, on_thinking, on_text, on_thinking_end=None):
+    def __init__(self, on_thinking, on_text, on_thinking_end=None, initial_thinking=True):
         self.on_thinking = on_thinking
         self.on_text = on_text
         self.on_thinking_end = on_thinking_end
-        self.thinking = True
+        # #597: GLM emits reasoning only when the prompt opened <think> (thinking on);
+        # with thinking off the prompt already closed it, so output is pure answer and
+        # the splitter must start in text mode or it would file the whole answer as reasoning.
+        self.thinking = initial_thinking
         self.buf = ""
 
     def _emit(self, text):
@@ -655,11 +658,13 @@ class ThinkingStreamSplit:
         self._emit(self.buf)
         self.buf = ""
 
+    close = finish        # interface parity with InklingStreamSplit in the streaming path
 
-def split_thinking_reply(text):
+
+def split_thinking_reply(text, enable_thinking=True):
     """Return the marker-free (thinking, answer) portions of one GLM reply."""
     thinking, answer = [], []
-    split = ThinkingStreamSplit(thinking.append, answer.append)
+    split = ThinkingStreamSplit(thinking.append, answer.append, initial_thinking=enable_thinking)
     split.feed(text)
     split.finish()
     return "".join(thinking), "".join(answer)
@@ -1208,6 +1213,15 @@ class Engine:
                         events = self.pending.get(request_id)
                     if events is not None:
                         events.put(("data", data))
+                elif kind == "ACCEPT" and len(fields) >= 3:
+                    # #597: the engine validated the submission (fits context) before prefill.
+                    # Keep it pending — DATA/DONE still follow — and let generate() commit the
+                    # HTTP stream only now, so an earlier CONTEXT_EXCEEDED stays a clean 400.
+                    request_id = fields[1]
+                    with self.pending_lock:
+                        events = self.pending.get(request_id)
+                    if events is not None:
+                        events.put(("accept", {"prompt_tokens": int(fields[2])}))
                 elif kind == "DONE" and len(fields) >= 7:
                     request_id = fields[1]
                     stats = self._stats(fields[2:])
@@ -1280,7 +1294,7 @@ class Engine:
                 self._fail_pending(error)
 
     def generate(self, prompt, max_tokens, temperature, top_p, on_text, cache_slot=0,
-                 cancelled=None, grammar=None, stopped=None):
+                 cancelled=None, grammar=None, stopped=None, on_accept=None):
         if isinstance(cache_slot, bool) or not isinstance(cache_slot, int) or not 0 <= cache_slot < self.kv_slots:
             raise APIError(400, "Invalid cache slot.", "cache_slot")
         payload = prompt.encode("utf-8")
@@ -1323,9 +1337,27 @@ class Engine:
 
         cancel_sent = False
         stop_sent = False
+        accepted = False
+
+        def _accept(info):
+            # #597: commit exactly once, on the first of ACCEPT / DATA / DONE. A new engine sends
+            # ACCEPT before any output, so on_accept fires before prefill and a preceding
+            # CONTEXT_EXCEEDED never reaches here (it propagates as a 400 with nothing committed).
+            # An older engine that never sends ACCEPT still commits on its first DATA/DONE.
+            nonlocal accepted
+            if not accepted:
+                accepted = True
+                if on_accept is not None:
+                    on_accept(info)
+
         while True:
             kind, value = events.get()
-            if kind == "data":
+            if kind == "accept":
+                if accepted:
+                    raise RuntimeError("engine sent a duplicate ACCEPT frame")
+                _accept(value)
+            elif kind == "data":
+                _accept({"prompt_tokens": None})
                 if not cancel_sent and not stop_sent:
                     decode(value)
                     if stopped and stopped():
@@ -1339,6 +1371,7 @@ class Engine:
                             self.process.stdin.write(f"CANCEL {request_id}\n".encode())
                             self.process.stdin.flush()
             elif kind == "done":
+                _accept({"prompt_tokens": None})
                 tail = decoder.decode(b"", final=True)
                 if tail:
                     on_text(tail)
@@ -1368,7 +1401,7 @@ class APIServer(ThreadingHTTPServer):
 
     def __init__(self, address, engine, model_id, api_key=None, max_tokens=1024,
                  cors_origins=DEFAULT_CORS_ORIGINS, max_queue=8, queue_timeout=300,
-                 kv_slots=1):
+                 kv_slots=1, allowed_hosts=()):
         super().__init__(address, APIHandler)
         self.engine = engine
         self.model_id = model_id
@@ -1377,6 +1410,11 @@ class APIServer(ThreadingHTTPServer):
         self.scheduler = GenerationScheduler(max_queue, queue_timeout, kv_slots)
         self.kv_slots = kv_slots
         self.cors_origins = tuple(cors_origins)
+        # Extra Host header values trusted past the DNS-rebinding guard, for a
+        # reverse proxy / MagicDNS in front of the loopback bind (#597). Explicit
+        # opt-in only: no wildcard, default stays loopback + bind address.
+        self.allowed_hosts = tuple(
+            h.strip().lower() for h in allowed_hosts if h and h.strip())
         self.created = int(time.time())
 
 
@@ -1385,9 +1423,58 @@ class APIHandler(BaseHTTPRequestHandler):
     timeout = 30   # per-request socket timeout: a slowloris client that dribbles its
                    # request line/body can't pin a worker thread (and a slot) forever
     server_version = "colibri"
+    _committed = False    # status line already on the wire; reset per request below
+    _body_read = False    # request body fully consumed, so nothing is left to drain
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[api] %s - %s\n" % (self.address_string(), fmt % args))
+
+    def handle_one_request(self):
+        """Per-request bookkeeping for HTTP/1.1 persistence (#597 item 3).
+
+        One handler instance serves every request on a keep-alive connection, so both flags
+        reset here rather than in do_POST. The drain afterwards is the whole fix for the
+        reported `Bad request syntax ('{...json...}POST /v1/...')`: any early rejection --
+        403 Host, 401 auth, a bad or oversized Content-Length -- returns before read_json(),
+        leaving the body in the socket, where the next readline() eats it as a request line.
+        Draining once at the request boundary covers every such path, present and future,
+        instead of asking each early return to remember."""
+        self._committed = False
+        self._body_read = False
+        super().handle_one_request()
+        if not self.close_connection:
+            self._drain_request_body()
+
+    def send_response(self, code, message=None):
+        """Single choke point for "the status line is out". Overriding here rather than
+        tracking it at each call site means no responder can forget (#597 item 3)."""
+        self._committed = True
+        super().send_response(code, message)
+
+    def _drain_request_body(self):
+        """Consume any unread request body so the next request line is at the head of the
+        stream. Where the body can't be swallowed safely, close instead: an unreusable
+        connection is correct, a desynchronised one is not."""
+        if self._body_read:
+            return
+        self._body_read = True
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True   # not framed by Content-Length; we don't de-chunk
+            return
+        try:
+            remaining = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.close_connection = True   # unparseable framing: the body length is unknown
+            return
+        if remaining < 0 or remaining > MAX_BODY:
+            self.close_connection = True   # don't burn bandwidth just to keep a socket warm
+            return
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                self.close_connection = True
+                return
+            remaining -= len(chunk)
 
     def send_json(self, status, body, request_id=None, headers=None):
         data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
@@ -1447,6 +1534,7 @@ class APIHandler(BaseHTTPRequestHandler):
             name = host                                            # bare host / bracketless ipv6
         name = name.strip().lower()
         allowed = set(self.LOOPBACK_HOSTS)
+        allowed.update(self.server.allowed_hosts)          # #597: operator-trusted reverse-proxy names
         try:
             allowed.add(str(self.server.server_address[0]).strip("[]").lower())
         except Exception:
@@ -1461,8 +1549,12 @@ class APIHandler(BaseHTTPRequestHandler):
             raise APIError(400, "Invalid Content-Length header.")
         if length < 1 or length > MAX_BODY:
             raise APIError(400, f"Request body must be between 1 and {MAX_BODY} bytes.")
+        raw = self.rfile.read(length)
+        # Only a full read leaves nothing to drain; a short read means the peer went away
+        # mid-body, and the drain will notice the EOF and close (#597 item 3).
+        self._body_read = len(raw) == length
         try:
-            body = json.loads(self.rfile.read(length))
+            body = json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise APIError(400, "Request body must be valid JSON.")
         if not isinstance(body, dict):
@@ -1584,19 +1676,28 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 raise APIError(404, "Not found.", None, "not_found")
         except APIError as error:
-            self.send_json(error.status, self.error_body(error), request_id, error.headers)
+            self._fail(error, request_id)
         except ClientCancelled:
             pass
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as error:
             self.log_error("request failed: %s", error)
-            api_error = APIError(500, "The colibri engine failed to process the request.",
-                                 None, "engine_error", "server_error")
             try:
-                self.send_json(500, self.error_body(api_error), request_id)
+                self._fail(APIError(500, "The colibri engine failed to process the request.",
+                                    None, "engine_error", "server_error"), request_id)
             except OSError:
                 pass
+
+    def _fail(self, error, request_id):
+        """Report an error, unless the response is already on the wire. Once a streaming 200
+        is committed, a second status line would be framed as SSE body -- clients saw a whole
+        `HTTP/1.1 500` spliced into the event stream. All we can still do is stop talking; the
+        stream ends at the close, which the 200 already announced (#597 item 3)."""
+        if self._committed:
+            self.close_connection = True
+            return
+        self.send_json(error.status, self.error_body(error), request_id, error.headers)
 
     def error_body(self, error):
         """Anthropic clients parse a different error envelope; the OpenAI one is unchanged."""
@@ -1604,7 +1705,8 @@ class APIHandler(BaseHTTPRequestHandler):
             return error_object(error)
         return {"type": "error", "error": {"type": error.error_type, "message": error.message}}
 
-    def generation(self, body, prompt, request_id, chat, tools=None, tool_choice=None):
+    def generation(self, body, prompt, request_id, chat, tools=None, tool_choice=None,
+                   enable_thinking=False):
         # COLI_DEBUG tees the engine transaction to stderr: 1 = decoded output stream only,
         # 2 = both sides (rendered prompt + output). render_chat already folds prior turns and
         # tool results into `prompt`, so level 2 is the full conversation the engine saw.
@@ -1658,6 +1760,11 @@ class APIHandler(BaseHTTPRequestHandler):
                 reasoning = ""
                 if ARCH == "inkling":
                     text, reasoning = split_inkling(text)
+                elif chat:
+                    # #597 item 4: GLM emits reasoning then </think> then the answer. Route the
+                    # reasoning to reasoning_content instead of dumping it (or the raw </think>)
+                    # into the visible answer / tool-call parser.
+                    reasoning, text = split_thinking_reply(text, enable_thinking)
                 length_finish = "length" if stats["length_limited"] else "stop"
                 if chat and tools:
                     content, calls = parse_tool_calls(text, tools)
@@ -1681,22 +1788,19 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
 
             stream_object = "chat.completion.chunk" if chat else object_name
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("X-Accel-Buffering", "no")
-            self.send_header("x-request-id", request_id)
-            for name, value in queue_headers.items(): self.send_header(name, value)
-            self.send_cors_headers()
-            self.end_headers()
-            connected = True
+            # #597 item 6: DO NOT commit the 200 yet. The engine validates the prompt against the
+            # context AFTER we would have sent headers, so an oversized prompt used to be a
+            # CONTEXT_EXCEEDED discovered too late to send a clean 400. Defer the SSE headers into
+            # start_stream(), fired on the engine's ACCEPT frame (before prefill); an ERROR that
+            # arrives before ACCEPT propagates as an APIError with nothing committed -> proper 400.
+            connected = False
+            stream_started = [False]
+            ka_thread = [None]
             # KEEPALIVE: engine.generate() blocks SILENTLY during the (minutes-long) cold
             # prefill, and the client drops the socket after its idle timeout. A background pump
-            # emits a reasoning_content "." delta (the channel that reliably resets the client's
-            # timer and lands in the thinking panel, so answer content stays clean) whenever no
-            # event has been written for KA_GAP seconds. All wfile writes share ka_lock so the
-            # pump and event() never interleave; last_write gates the pump so it stays quiet
-            # while real tokens are flowing (e.g. during decode).
+            # emits a keepalive delta whenever no event has been written for KA_GAP seconds. All
+            # wfile writes share ka_lock so the pump and event() never interleave; last_write
+            # gates the pump so it stays quiet while real tokens are flowing (e.g. during decode).
             ka_lock = threading.Lock()
             last_write = [time.time()]
             ka_stop = threading.Event()
@@ -1721,17 +1825,20 @@ class APIHandler(BaseHTTPRequestHandler):
                         connected = False
 
             def _keepalive():
-                ping = [{"index": 0, "delta": ({"reasoning_content": "."} if chat else {"content": ""}),
+                # #597: an empty delta already resets the client's idle timer without
+                # painting hundreds of dots in the reasoning panel during a minutes-long
+                # cold prefill. COLI_VISIBLE_KEEPALIVE=1 restores the old visible "." for
+                # diagnosing whether keepalives are being delivered at all.
+                visible = os.environ.get("COLI_VISIBLE_KEEPALIVE") == "1"
+                ping = [{"index": 0,
+                         "delta": ({"reasoning_content": "." if visible else ""} if chat
+                                   else {"content": ""}),
                          "logprobs": None, "finish_reason": None}]
                 while not ka_stop.wait(1.0):
                     if not connected:
                         return
                     if time.time() - last_write[0] >= KA_GAP:
                         event(ping)
-
-            if chat:
-                event([{"index": 0, "delta": {"role": "assistant", "content": ""},
-                        "logprobs": None, "finish_reason": None}])
 
             def emit(text):
                 choice = ({"index": 0, "delta": {"content": text}, "logprobs": None,
@@ -1745,9 +1852,41 @@ class APIHandler(BaseHTTPRequestHandler):
 
             splitter = (InklingStreamSplit(emit, emit_reasoning if chat else None)
                         if ARCH == "inkling" else None)
+            # #597 item 4: GLM (chat) streams reasoning then </think> then the answer. Split the
+            # reasoning into reasoning_content deltas instead of leaking it — and the raw </think> —
+            # into visible content or the tool-call buffer.
+            glm_think = chat and ARCH != "inkling"
 
-            ka_thread = threading.Thread(target=_keepalive, daemon=True)
-            ka_thread.start()
+            def start_stream(_accept_info=None):
+                # #597 item 6: commit the streaming 200 (and start the keepalive) exactly once,
+                # only after the engine ACCEPTs the prompt. Idempotent: generate() also calls this
+                # on the first DATA/DONE so an older engine with no ACCEPT frame still streams.
+                nonlocal connected
+                if stream_started[0]:
+                    return
+                stream_started[0] = True
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                # An SSE body has neither Content-Length nor chunked framing, so end-of-message
+                # IS the close -- HTTP/1.1 requires us to say so, or the client waits for a
+                # length that never comes and then tries to reuse a socket we are about to drop.
+                # Set close_connection HERE, not after the last event: if generation raises once
+                # the 200 is out, the connection must still not be offered for reuse (#597 item 3).
+                self.send_header("Connection", "close")
+                self.close_connection = True
+                self.send_header("x-request-id", request_id)
+                for name, value in queue_headers.items(): self.send_header(name, value)
+                self.send_cors_headers()
+                self.end_headers()
+                connected = True
+                last_write[0] = time.time()
+                if chat:
+                    event([{"index": 0, "delta": {"role": "assistant", "content": ""},
+                            "logprobs": None, "finish_reason": None}])
+                ka_thread[0] = threading.Thread(target=_keepalive, daemon=True)
+                ka_thread[0].start()
             if chat and tools:
                 # Suppress tool-call markers from the streamed content and parse the authoritative
                 # calls from the FULL reply after generation. Hold back a marker-length tail so a
@@ -1755,10 +1894,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 sp = {"buf": "", "tool": False}
                 hold = len(BOX_START) - 1
                 raw = []
-                def emit_tools(chunk):
+                def feed_content(chunk):               # answer text only (post-</think>)
                     raw.append(chunk)
-                    if dbg_echo:
-                        sys.stderr.write(chunk); sys.stderr.flush()
                     if sp["tool"]:
                         return
                     sp["buf"] += chunk
@@ -1773,11 +1910,23 @@ class APIHandler(BaseHTTPRequestHandler):
                     if flush:
                         emit(sp["buf"][:flush])
                         sp["buf"] = sp["buf"][flush:]
+                # #597: keep GLM reasoning out of the tool-call buffer — a think splitter sends it
+                # to reasoning_content and passes only the answer text on to feed_content/parser.
+                think = (ThinkingStreamSplit(emit_reasoning, feed_content,
+                                             initial_thinking=enable_thinking)
+                         if glm_think else None)
+                def emit_tools(chunk):
+                    if dbg_echo:
+                        sys.stderr.write(chunk); sys.stderr.flush()
+                    (think.feed if think else feed_content)(chunk)
                 stop_filter = StopFilter(stop_sequences, emit_tools, ignore_leading_stop)
                 stats = self.server.engine.generate(
                     prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
-                    lambda: not connected, grammar=grammar, stopped=stop_filter.stopped)
+                    lambda: not connected, grammar=grammar, stopped=stop_filter.stopped,
+                    on_accept=start_stream)
                 stop_filter.finish()
+                if think:
+                    think.finish()
                 if not sp["tool"] and sp["buf"]:
                     emit(sp["buf"])                     # no tool call happened: flush held tail
                 _content, calls = parse_tool_calls("".join(raw), tools)
@@ -1788,20 +1937,31 @@ class APIHandler(BaseHTTPRequestHandler):
                             "logprobs": None, "finish_reason": None}])
                 finish = "tool_calls" if calls else ("length" if stats["length_limited"] else "stop")
             else:
+                if splitter is not None:                   # inkling content/marker splitter
+                    content_split = splitter
+                elif glm_think:                            # GLM <think> reasoning → reasoning_content
+                    content_split = ThinkingStreamSplit(emit_reasoning, emit,
+                                                        initial_thinking=enable_thinking)
+                else:
+                    content_split = None
                 def emit_plain(chunk):
                     if dbg_echo:
                         sys.stderr.write(chunk); sys.stderr.flush()
-                    (splitter.feed if splitter else emit)(chunk)
+                    (content_split.feed if content_split else emit)(chunk)
                 stop_filter = StopFilter(stop_sequences, emit_plain, ignore_leading_stop)
                 stats = self.server.engine.generate(
                     prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
-                    lambda: not connected, grammar=grammar, stopped=stop_filter.stopped)
+                    lambda: not connected, grammar=grammar, stopped=stop_filter.stopped,
+                    on_accept=start_stream)
                 stop_filter.finish()
-                if splitter:
-                    splitter.close()
+                if content_split:
+                    content_split.close()
                 finish = "length" if stats["length_limited"] else "stop"
+            # generate() returned, so the prompt was ACCEPTed and start_stream() ran; guard anyway.
+            start_stream()
             ka_stop.set()                          # generation done: stop the keepalive pump
-            ka_thread.join(timeout=2)
+            if ka_thread[0] is not None:
+                ka_thread[0].join(timeout=2)
             final_choice = ({"index": 0, "delta": {}, "logprobs": None, "finish_reason": finish}
                             if chat else {"index": 0, "text": "", "logprobs": None,
                                           "finish_reason": finish})
@@ -1815,7 +1975,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         self.wfile.flush()
                     except OSError:
                         pass
-            self.close_connection = True
+            # close_connection was already set when the 200 was committed (#597 item 3).
 
     def client_disconnected(self):
         try:
@@ -1854,7 +2014,8 @@ class APIHandler(BaseHTTPRequestHandler):
         renderer = render_chat_inkling if ARCH == "inkling" else render_chat
         prompt = renderer(body.get("messages"), enable_thinking, reasoning_effort, tools,
                           tool_choice)
-        self.generation(body, prompt, request_id, True, tools, tool_choice)
+        self.generation(body, prompt, request_id, True, tools, tool_choice,
+                        enable_thinking=enable_thinking)
 
     # ---- Anthropic /v1/messages (#343) ----------------------------------------------------
     ANTHROPIC_STOP = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use"}
@@ -1948,6 +2109,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Connection", "close")   # see the OpenAI path: SSE is close-framed
+            self.close_connection = True
             self.send_header("x-request-id", request_id)
             for name, value in queue_headers.items():
                 self.send_header(name, value)
@@ -2079,7 +2242,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 "delta": {"stop_reason": stop_reason, "stop_sequence": None},
                 "usage": {"output_tokens": stats["completion_tokens"]}})
             send_event("message_stop", {"type": "message_stop"})
-            self.close_connection = True
+            # close_connection was already set when the 200 was committed (#597 item 3).
 
     def completion(self, body, request_id):
         prompt = body.get("prompt")
@@ -2092,7 +2255,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
 def serve(model, host="127.0.0.1", port=8000, model_id="glm-5.2-colibri", api_key=None,
           cap=8, max_tokens=1024, engine=None, env=None, cors_origins=None,
-          max_queue=8, queue_timeout=300, kv_slots=1):
+          max_queue=8, queue_timeout=300, kv_slots=1, allowed_hosts=()):
     if engine is None:
         engine = default_engine()
     if not 1 <= max_tokens:
@@ -2119,7 +2282,7 @@ def serve(model, host="127.0.0.1", port=8000, model_id="glm-5.2-colibri", api_ke
     # Bind before starting the 744B engine. A stale/occupied port must fail in
     # milliseconds rather than loading hundreds of GB and leaking a child.
     server = APIServer((host, port), None, model_id, api_key, max_tokens, origins,
-                       max_queue, queue_timeout, kv_slots)
+                       max_queue, queue_timeout, kv_slots, allowed_hosts=allowed_hosts)
     runtime = None
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
@@ -2154,6 +2317,11 @@ def main():
     parser.add_argument("--queue-timeout", type=float,
                         default=float(os.environ.get("COLI_QUEUE_TIMEOUT", "300")))
     parser.add_argument("--kv-slots", type=int, default=int(os.environ.get("COLI_KV_SLOTS", "1")))
+    parser.add_argument("--allowed-host", action="append",
+        default=[h.strip() for h in os.environ.get("COLI_ALLOWED_HOSTS", "").split(",") if h.strip()],
+        help="additional Host header value accepted by the DNS-rebinding guard "
+             "(reverse proxy / MagicDNS in front of the loopback bind); repeat as needed, "
+             "or set COLI_ALLOWED_HOSTS as a comma-separated list")
     args = parser.parse_args()
     global ARCH
     ARCH = args.arch
@@ -2167,7 +2335,8 @@ def main():
         args.model_id = "inkling-colibri" if ARCH == "inkling" else "glm-5.2-colibri"
     serve(args.model, args.host, args.port, args.model_id, args.api_key,
           args.cap,args.max_tokens,args.engine,cors_origins=args.cors_origin,
-          max_queue=args.max_queue,queue_timeout=args.queue_timeout,kv_slots=args.kv_slots)
+          max_queue=args.max_queue,queue_timeout=args.queue_timeout,kv_slots=args.kv_slots,
+          allowed_hosts=args.allowed_host)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,12 @@
 #endif
 #include <sys/stat.h>                             /* fstat per mmap degli shard (COLI_MMAP) */
 #include <signal.h>                               /* SIGINT = stop morbido del turno in serve mode */
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <psapi.h>                                /* Required for GetProcessMemoryInfo */
 #endif
 #ifdef __linux__
 #include <sys/vfs.h>                              /* statfs: real fs-type check for the 9p warning (below) */
@@ -362,12 +368,29 @@ static int parse_cuda_devices(const char *list, int *out){
     return n;
 }
 #endif
-static double now_s(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec*1e-9; }
-static double rss_gb(void){ struct rusage r; getrusage(RUSAGE_SELF,&r);
+static double now_s(void){
+#ifdef _WIN32
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (double)count.QuadPart / (double)freq.QuadPart;
+#else
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec*1e-9;
+#endif
+}
+static double rss_gb(void){
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc = {0}; pmc.cb = sizeof(pmc);
+    if(GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc)))
+        return pmc.WorkingSetSize / (1024.0 * 1024.0 * 1024.0);
+    return 0;
+#else
+    struct rusage r; getrusage(RUSAGE_SELF,&r);
 #ifdef __APPLE__
     return r.ru_maxrss/(1024.0*1024.0*1024.0);   /* macOS: ru_maxrss in BYTE */
 #else
     return r.ru_maxrss/(1024.0*1024.0);          /* Linux: in KB */
+#endif
 #endif
 }
 /* ---- PROF=1: opt-in performance profile ----------------------------------
@@ -1471,7 +1494,7 @@ static QT qt_load(Model *m, const char *name, int O, int I, int bits){
     return t;
 }
 static float *ld(Model *m, const char *name){   /* tensore 1D f32 residente (norme/bias) */
-    int64_t n=st_numel(&m->S,name); if(n<0){fprintf(stderr,"missing %s\n",name);exit(1);}
+    int64_t n=st_numel(&m->S,name); if(n<0) st_die_missing(&m->S,name);
     float *p=(float*)qalloc((size_t)n*sizeof(float));   /* registrato per la GPU sotto METAL */
     st_read_f32(&m->S,name,p,0); return p;
 }
@@ -2006,7 +2029,8 @@ static int expert_load_impl(Model *m, int layer, int eid, ESlot *s, int fatal, i
     for(int k=0;k<3;k++){
         tw[k]=st_find(&m->S,nm[k]);
         snprintf(qn,sizeof(qn),"%s.qs",nm[k]); tq[k]=st_find(&m->S,qn);
-        if(!tw[k]||!tq[k]){ fprintf(stderr,"missing %s\n",nm[k]); if(fatal) exit(1); return -1; }
+        if(!tw[k]||!tq[k]){ if(fatal) st_die_missing(&m->S,nm[k]);   /* #586: diagnose, don't just name it */
+                            fprintf(stderr,"missing %s\n",nm[k]); return -1; }
     }
     if(g_disk_split){ /* split load/byte per tipo layer; atomici: expert_load gira anche su OMP/pipe/pilot */
         int64_t tb=0; for(int k=0;k<3;k++) tb+=tw[k]->nbytes+tq[k]->nbytes;
@@ -5365,8 +5389,27 @@ static void emit_stream(int t, void *ud){
 }
 
 /* teacher-forcing: un solo forward su ids[S], argmax per posizione in pred[S] */
-static void forward_all(Model *m, const int *ids, int S, int *pred){
+/* DEBUG_LOGITS=1: on a teacher-forcing mismatch, dump the top-5 logits, the top1-top2 margin,
+ * and where the expected/got tokens land. Makes a near-tie divergence (e.g. the Metal prefill
+ * GEMM accumulation-order drift, #622) visible as the tiny gap it is, rather than a bare token
+ * mismatch. Stderr, opt-in, only on a mismatch — normal runs are byte-for-byte unchanged. */
+static void dump_top5_logits(int pos, const float *lo, int V, int expected, int got){
+    int idx[5]; float val[5];
+    for(int k=0;k<5;k++){ idx[k]=-1; val[k]=-INFINITY; }
+    for(int i=0;i<V;i++){ float v=lo[i];
+        for(int k=0;k<5;k++) if(v>val[k]){
+            for(int j=4;j>k;j--){ val[j]=val[j-1]; idx[j]=idx[j-1]; }
+            val[k]=v; idx[k]=i; break; } }
+    double gap = (idx[1]>=0) ? (double)(val[0]-val[1]) : 0.0;
+    fprintf(stderr,"[LOGITS] pos=%d top1-top2 gap=%.3e | expected=%d (%.5f)  got=%d (%.5f) | top5:",
+            pos, gap, expected, (expected>=0&&expected<V)?(double)lo[expected]:0.0,
+            got, (got>=0&&got<V)?(double)lo[got]:0.0);
+    for(int k=0;k<5&&idx[k]>=0;k++) fprintf(stderr," %d:%.5f", idx[k], (double)val[k]);
+    fprintf(stderr,"\n");
+}
+static void forward_all(Model *m, const int *ids, int S, int *pred, const int *ref){
     Cfg *c=&m->c; int D=c->hidden;
+    int dbg = ref && getenv("DEBUG_LOGITS");
     kv_alloc(m,S);
     float *x=falloc((int64_t)S*D);
     for(int s=0;s<S;s++) embed_row(m, ids[s], x+(int64_t)s*D);
@@ -5378,6 +5421,7 @@ static void forward_all(Model *m, const int *ids, int S, int *pred){
         matmul_qt(lo, row, &m->lm_head, 1);
         int best=0; float bv=lo[0]; for(int i=1;i<c->vocab;i++) if(lo[i]>bv){bv=lo[i];best=i;}
         pred[s]=best;
+        if(dbg && pred[s]!=ref[s]) dump_top5_logits(s, lo, c->vocab, ref[s], pred[s]);
     }
     free(x); free(lo); free(row);
 }
@@ -6169,6 +6213,11 @@ static int mux_submit(Model *m, Tok *T, ServeCtx *ctx, ServeReq *req, GrDraft *g
         printf("ERROR %llu CONTEXT_EXCEEDED %d %d\n",sub.id,nt,maxctx-2);
         fflush(stdout); return 0;
     }
+    /* #597: the submission is valid (encoded, non-empty, fits the context). Announce it before
+     * prefill so the gateway commits the streaming 200 only now. Every failure above returned
+     * first with an ERROR, so a request yields exactly one of ACCEPT or an early ERROR -- which
+     * lets a CONTEXT_EXCEEDED become a clean HTTP 400 instead of a broken already-200 stream. */
+    printf("ACCEPT %llu %d\n",sub.id,nt); fflush(stdout);
     int prefix=0; while(prefix<sc->len && prefix<nt && sc->hist[prefix]==tmp[prefix]) prefix++;
     if(prefix<sc->len){ sc->len=prefix; if(m->has_mtp) m->kv_start[m->c.n_layers]=-1;
         kv_disk_truncate(m,sc->len); }
@@ -7720,7 +7769,7 @@ int main(int argc, char **argv){
     if(getenv("TF")){
         int *tf=read_arr(ref,"tf_pred",&(int){0});
         int *pred=malloc(nfull*sizeof(int)); double tt=now_s();
-        forward_all(&m, full, nfull, pred); double tdt=now_s()-tt;
+        forward_all(&m, full, nfull, pred, tf); double tdt=now_s()-tt;
         int ok=0; for(int i=0;i<nfull;i++){
             if(pred[i]==tf[i]) ok++;
             else fprintf(stderr,"[ORACLE] mismatch pos=%d expected=%d got=%d\n",i,tf[i],pred[i]);

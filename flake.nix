@@ -79,7 +79,6 @@
 
             # $out/bin holds the user-facing entry points.
             ln -s ../lib/colibri/colibri $out/bin/colibri
-            ln -s colibri $out/bin/glm
 
             # Wrap coli: point it at the bundled engine (COLI_ENGINE) so it is
             # found by default, and at the module dir (PYTHONPATH) so
@@ -121,9 +120,14 @@
             type = "app";
             program = pkgs.lib.getExe colibri;
           };
-          glm = {
+          # `nix run .#engine` runs the engine binary directly, skipping the
+          # coli launcher. Named "engine", not "colibri", so it doesn't shadow
+          # packages.colibri (whose mainProgram is coli). Replaces the old
+          # `.#glm`, which pointed at a share/colibri/ path the installPhase
+          # never produced (#595).
+          engine = {
             type = "app";
-            program = "${colibri}/bin/glm";
+            program = "${colibri}/bin/colibri";
           };
         };
 

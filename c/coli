@@ -281,7 +281,8 @@ def cuda_binary():
     if sys.platform == "linux":
         try:
             linked=subprocess.run(["ldd",GLM],capture_output=True,text=True,timeout=3)
-            return any("libcudart" in line and "not found" not in line
+            # Detect both CUDA (libcudart) and HIP (libamdhip64) builds.
+            return any(("libcudart" in line or "libamdhip64" in line) and "not found" not in line
                        for line in linked.stdout.splitlines())
         except (OSError,subprocess.SubprocessError): return False
     if sys.platform == "win32":
@@ -666,11 +667,15 @@ def cmd_doctor(a):
         if vram<0: raise ValueError("--vram cannot be negative")
     except ValueError as error:
         report={"schema_version":1,"status":"error","model":os.path.abspath(a.model),
+                "mode":"deep" if a.deep else "standard",
                 "checks":[{"id":"config.arguments","status":"fail","summary":str(error)}],
                 "plan":None}
         print(json.dumps(report,indent=2) if a.json else format_doctor(report))
         return 2
-    report=run_doctor(a.model,ram,ctx,devices,vram,engine_path=GLM)
+    report=run_doctor(
+        a.model, ram, ctx, devices, vram, engine_path=GLM, deep=a.deep,
+        mirror_dir=os.environ.get("COLI_MODEL_MIRROR"),
+    )
     print(json.dumps(report,indent=2) if a.json else format_doctor(report))
     return exit_code(report)
 
@@ -1209,6 +1214,8 @@ def main(argv=None):
     ramdisk.configure_parser(prd, common_parent=common)
     pd=sub.add_parser("doctor",parents=[common])
     pd.add_argument("--json",action="store_true",help="emit a versioned JSON report")
+    pd.add_argument("--deep",action="store_true",
+                    help="strictly check every tensor layout, model index, and configured mirror")
     pr=sub.add_parser("run", parents=[common]);  pr.add_argument("prompt", nargs="*")
     pc=sub.add_parser("chat", parents=[common])
     pc.add_argument("--attach", nargs="?", const="http://127.0.0.1:8000", default=None,

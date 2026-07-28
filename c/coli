@@ -1109,7 +1109,11 @@ def cmd_stop(a):
 def cmd_web(a):
     """serve + open the dashboard in the browser once the API answers."""
     need_model(a.model)
-    dist = os.path.join(os.path.dirname(os.path.abspath(HERE)), "web", "dist")
+    # Same two layouts openai_server.py resolves: next to this script (release
+    # archive / installed tree) or one level up (source checkout, where this is c/coli).
+    cands = [os.path.join(HERE, "web", "dist"),
+             os.path.join(os.path.dirname(os.path.abspath(HERE)), "web", "dist")]
+    dist = next((d for d in cands if os.path.exists(os.path.join(d, "index.html"))), cands[-1])
     if not os.path.exists(os.path.join(dist, "index.html")):
         print(f"{C.yel}web UI not built:{C.r} run  cd web && npm install && npm run build  first;")
         print("serving the API anyway (the dashboard will 404 until built).")

@@ -376,6 +376,28 @@ def cuda_linkage(engine_path):
     return {"linked": False, "missing": False}
 
 
+def missing_shared_libraries(engine_path):
+    """Shared libraries the engine needs but the loader cannot resolve.
+
+    A binary built elsewhere (a prebuilt release, a copied build, a disk moved to a
+    fresh host) can be present and executable yet still fail to start. The engine
+    exits before printing anything and the caller only sees "engine exited
+    unexpectedly", so name the unresolved libraries instead. Typical case: a minimal
+    image without libgomp1, where every OpenMP build reports
+    "libgomp.so.1 => not found".
+    """
+    engine = Path(engine_path)
+    if os.name != "posix" or not engine.is_file():
+        return []
+    try:
+        result = subprocess.run(["ldd", str(engine)], capture_output=True, text=True,
+                                timeout=3, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return []          # no ldd (musl, macOS): cannot tell, so claim nothing
+    return sorted({line.split("=>")[0].strip()
+                   for line in result.stdout.splitlines() if "not found" in line})
+
+
 def run_doctor(model, ram_gb=0, context=4096, gpu_indices=None, vram_gb=0, *,
                engine_path, available_memory=None, available_disk=None, gpus=None,
                linkage=None, deep=False, mirror_dir=None):
@@ -419,7 +441,14 @@ def run_doctor(model, ram_gb=0, context=4096, gpu_indices=None, vram_gb=0, *,
     else:
         engine_ok = engine.is_file() and os.access(engine, os.X_OK)
     if engine_ok:
-        checks.append(_check("engine.binary", "pass", "engine executable is ready", path=str(engine)))
+        unresolved = missing_shared_libraries(engine)
+        if unresolved:
+            checks.append(_check("engine.binary", "fail",
+                                 "engine cannot load: " + ", ".join(unresolved) +
+                                 " (install the runtime package, e.g. libgomp1, and retry)",
+                                 path=str(engine), missing=unresolved))
+        else:
+            checks.append(_check("engine.binary", "pass", "engine executable is ready", path=str(engine)))
     elif engine.is_file():
         checks.append(_check("engine.binary", "fail", "engine exists but is not executable", path=str(engine)))
     else:

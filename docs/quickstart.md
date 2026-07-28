@@ -42,6 +42,10 @@ CPU-only by default.
 > Build from source instead if you want the fastest binary for *your* CPU
 > (`ARCH=native` unlocks the vector instructions your chip actually has), or if
 > you plan to hack on the engine.
+>
+> **On ARM64 Linux (AWS Graviton, Ampere, Raspberry Pi, aarch64 VMs) there is no
+> shortcut**: the published Linux archive is x86_64 only. Build from source —
+> sections 1 and 2 work unchanged, and the engine needs no ARM-specific flags.
 
 ### Linux (Ubuntu / Debian)
 
@@ -51,7 +55,16 @@ sudo apt install -y build-essential git python3
 ```
 
 `build-essential` gives you `gcc`, `make`, and OpenMP (libgomp) — everything the
-engine needs.
+engine needs. The same line works on aarch64: the engine is portable C with
+OpenMP and no x86-only intrinsics, so `./setup.sh` builds it on ARM64 without
+source changes or extra flags (verified on AWS Graviton4, Ubuntu 24.04, gcc 13).
+
+> **Moving a build to another machine?** The engine links `libgomp.so.1` at run
+> time. A host that has never had a compiler installed — a minimal cloud image, a
+> fresh container, a restored volume attached to a new instance — may not carry
+> it, and the engine then exits at startup before printing anything. Install the
+> runtime package alone (`sudo apt install -y libgomp1`); `coli doctor` names the
+> missing library.
 
 ### Windows
 

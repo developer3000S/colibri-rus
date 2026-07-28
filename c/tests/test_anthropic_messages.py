@@ -28,10 +28,14 @@ class FakeEngine:
         self.prompts = []
 
     def generate(self, prompt, maximum, temperature, top_p, on_text, cache_slot=0,
-                 cancelled=None, grammar=None):
+                 cancelled=None, grammar=None, stopped=None, on_accept=None):
         self.prompts.append(prompt)
+        self.emitted = 0
         for chunk in self.script:
             on_text(chunk)
+            self.emitted += 1
+            if stopped is not None and stopped():
+                break                        # the gateway hit a stop sequence
         return {"prompt_tokens": 11, "completion_tokens": 3,
                 "length_limited": self.length_limited}
 
@@ -181,6 +185,37 @@ class MessagesHTTPTest(unittest.TestCase):
         self.assertEqual(text, "Héllo")
         self.assertEqual(payloads[-2]["delta"]["stop_reason"], "end_turn")
         self.assertEqual(payloads[-2]["usage"]["output_tokens"], 3)
+
+    def test_role_marker_ends_the_turn(self):
+        """/v1/messages must apply the same implicit GLM stop sequences as
+        /v1/chat/completions. In serve mode the engine arms only <|endoftext|>
+        (#401/#549), so <|user|> arrives as ordinary text; without the filter it is
+        detokenized into the reply and generation runs on to max_tokens."""
+        script = ("ready", "<|user|>", "the user asks about cake")
+        self.engine.script = script
+        with self.post(self.base_body()) as response:
+            payload = json.load(response)
+        self.assertEqual(payload["content"], [{"type": "text", "text": "ready"}])
+        self.assertEqual(payload["stop_reason"], "end_turn")
+        self.assertEqual(self.engine.emitted, 2)   # tail cancelled, not merely hidden
+
+    def test_role_marker_ends_a_streamed_turn(self):
+        self.engine.script = ("ready", "<|user|>", "the user asks about cake")
+        with self.post(self.base_body(stream=True)) as response:
+            raw = response.read().decode()
+        self.assertNotIn("<|user|>", raw)
+        deltas = [json.loads(line[len("data: "):]) for line in raw.splitlines()
+                  if line.startswith("data: ")]
+        text = "".join(d["delta"]["text"] for d in deltas
+                       if d["type"] == "content_block_delta" and "text" in d["delta"])
+        self.assertEqual(text, "ready")
+        self.assertEqual(self.engine.emitted, 2)
+
+    def test_marker_split_across_chunks_is_still_caught(self):
+        self.engine.script = ("read", "y<|", "user|>", "cake")
+        with self.post(self.base_body()) as response:
+            payload = json.load(response)
+        self.assertEqual(payload["content"], [{"type": "text", "text": "ready"}])
 
     def test_tool_call_becomes_tool_use_block(self):
         self.engine.script = ("Sure. <tool_call>get_weather<arg_key>city</arg_key>"

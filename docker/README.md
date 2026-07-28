@@ -78,7 +78,7 @@ python -m pip install -U huggingface_hub[cli]
 On Linux, use `python3` instead of `python`.
 2. **Download the model** (open the terminal in the folder where you want to save it):
 ```bash
-hf_download mateogrgic/GLM-5.2-colibri-int4-with-int8-mtp --local-dir .
+hf_download mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp --local-dir .
 ```
 
 **Example**: if you want to save it in `C:\LLM\models\glm-5.2` (Windows):
@@ -90,7 +90,7 @@ hf_download mateogrgic/GLM-5.2-colibri-int4-with-int8-mtp --local-dir .
 
 If you are on Windows and cannot get it to work with Python:
 
-* Download manually from [Hugging Face](https://huggingface.co/mateogrgic/GLM-5.2-colibri-int4-with-int8-mtp)
+* Download manually from [Hugging Face](https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp)
 * Unzip into a folder (e.g., `C:\LLM\models\glm-5.2`)
 
 ---
@@ -371,7 +371,7 @@ Then retry the `hf_download` command.
 **Solution**:
 
 1. Wait and retry the `hf_download` command
-2. If it continues, download manually from [here](https://huggingface.co/mateogrgic/GLM-5.2-colibri-int4-with-int8-mtp)
+2. If it continues, download manually from [here](https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp)
 3. Unzip the ZIP file into the desired folder
 
 ---

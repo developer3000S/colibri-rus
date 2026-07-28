@@ -324,6 +324,21 @@ gemm-test: tests/test_gemm_largebatch.mm backend_metal.mm backend_metal.h
 	$(METALXX) $(OMPC) tests/test_gemm_largebatch.mm backend_metal.mm $(OMPL) -framework Metal -framework Foundation -o gemm_largebatch_test
 	./gemm_largebatch_test
 
+# fmt=6 (E8/IQ3) encoder for tools/convert_fp8_to_int4.py. OPTIONAL: iq3_pack.py
+# falls back to its numpy path when the library is absent, producing the same
+# bytes ~13x slower. Uses the same ARCH as the engine, so an AVX2 host gets the
+# SIMD search and anything else compiles the scalar fallback.
+ifneq (,$(DARWIN))
+IQ3LIB = tools/libiq3.dylib
+else ifneq ($(IS_WIN),)
+IQ3LIB = tools/iq3.dll
+else
+IQ3LIB = tools/libiq3.so
+endif
+iq3: $(IQ3LIB)
+$(IQ3LIB): tools/iq3_encode.c
+	$(CC) $(CFLAGS) -fPIC -shared $< -o $@ $(LDFLAGS)
+
 cuda-test: backend_cuda.cu backend_cuda.h backend_gpu_compat.h tests/test_backend_cuda.cu
 	@command -v "$(GPUCC)" >/dev/null 2>&1 || { echo "$(GPUCC_NAME) not found" >&2; exit 1; }
 	"$(GPUCC)" $(GPUFLAGS) backend_cuda.cu tests/test_backend_cuda.cu -o backend_cuda_test$(EXE)
@@ -526,6 +541,15 @@ install: colibri$(EXE) olmoe$(EXE)
 	$(INSTALL) -d -m 755 "$(DESTDIR)$(LIBEXECDIR)/ramdisk_support"
 	$(INSTALL) -m 644 ramdisk_support/*.py "$(DESTDIR)$(LIBEXECDIR)/ramdisk_support/"
 	$(INSTALL) -m 644 tools/*.py $(DESTDIR)$(LIBEXECDIR)/tools/
+	@# The dashboard is an optional build artifact (cd web && npm run build), so install
+	@# it only when it exists. It goes NEXT TO openai_server.py, which probes ./web/dist.
+	@if [ -f ../web/dist/index.html ]; then \
+	  $(INSTALL) -d $(DESTDIR)$(LIBEXECDIR)/web/dist; \
+	  cp -R ../web/dist/. $(DESTDIR)$(LIBEXECDIR)/web/dist/; \
+	  echo "installed the web dashboard"; \
+	else \
+	  echo "web/dist absent -- skipping the dashboard (build it with: cd web && npm run build)"; \
+	fi
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/coli
@@ -537,4 +561,4 @@ clean:
 
 bench: iobench$(EXE)
 	@if [ -n "$(ARGS)" ]; then ./iobench$(EXE) $(ARGS); else echo "built iobench$(EXE) — run: ./iobench$(EXE) <file> <MB> <iters> <threads> <direct 0|1>"; fi
-.PHONY: all colibri glm cuda-test hip-test gpu-compile cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench
+.PHONY: all colibri glm iq3 cuda-test hip-test gpu-compile cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench

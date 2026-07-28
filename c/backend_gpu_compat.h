@@ -47,6 +47,7 @@ namespace nvcuda { namespace wmma = ::rocwmma; }
 #define cudaMemcpy               hipMemcpy
 #define cudaMemcpy2D             hipMemcpy2D
 #define cudaMemcpyAsync          hipMemcpyAsync
+#define cudaMemcpyToSymbol       hipMemcpyToSymbol   /* fmt=6 E8 codebook upload */
 #define cudaMemcpyHostToDevice   hipMemcpyHostToDevice
 #define cudaMemcpyDeviceToHost   hipMemcpyDeviceToHost
 #define cudaMemGetInfo           hipMemGetInfo

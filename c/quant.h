@@ -1200,6 +1200,52 @@ static void matmul_e8(float *y, const float *x, const uint8_t *q, const float *u
                 uint16_t dh; memcpy(&dh, blk+96, 2);
                 float d=e8_fp16_to_f32(dh);
                 int base=(int)(b*E8_QK);
+#ifdef __AVX2__
+                /* One 8-weight lane is exactly one AVX2 register, which is what the
+                 * format's own shape suggests: a lane is two 4-dim grid rows (8
+                 * contiguous codebook bytes) plus 8 signs. So instead of expanding a
+                 * sub-block into a stack buffer and re-reading it, each lane is
+                 * decoded straight into a register and FMA'd against x:
+                 *   - the 8 grid bytes widen with one vpmovzxbd,
+                 *   - the sign byte (7 stored bits + the parity-derived 8th) expands
+                 *     to 8 lane masks with an AND/CMPEQ against the bit-select vector
+                 *     and is applied as an XOR of the float sign bit — no branches,
+                 *     which is what made the scalar expansion expensive,
+                 *   - 0.5 (the grid's half-unit convention) folds into the sub-scale.
+                 * Two accumulators over the 32 FMAs of a super-block keep this off a
+                 * single dependency chain, and one horizontal add per 256 weights
+                 * replaces one per 32. */
+                if(base+E8_QK<=I){
+                    const __m256i sel=_mm256_setr_epi32(1,2,4,8,16,32,64,128);
+                    const __m256i sgn=_mm256_set1_epi32((int)0x80000000u);
+                    __m256 ac[2]={_mm256_setzero_ps(),_mm256_setzero_ps()};
+                    for(int ib=0; ib<E8_QK/E8_SUB; ib++){
+                        uint32_t word; memcpy(&word, blk+E8_QK/4+ib*4, 4);
+                        float db=d*(0.5f+(float)((word>>28)&0xF))*0.5f;
+                        __m256 vdb=_mm256_set1_ps(0.5f*db);
+                        const uint8_t *ix=blk+ib*8;
+                        int off=base+ib*E8_SUB;
+                        for(int l=0;l<4;l++){
+                            uint32_t sv=(word>>(7*l))&0x7Fu;
+                            uint32_t s8=sv|((uint32_t)__builtin_parity(sv)<<7); /* odd parity closes the lane */
+                            uint32_t g0,g1;
+                            memcpy(&g0,e8_grid[ix[l*2+0]],4);
+                            memcpy(&g1,e8_grid[ix[l*2+1]],4);
+                            __m128i by=_mm_cvtsi64_si128((long long)((uint64_t)g0|((uint64_t)g1<<32)));
+                            __m256 v=_mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(by)),vdb);
+                            __m256i m=_mm256_cmpeq_epi32(_mm256_and_si256(_mm256_set1_epi32((int)s8),sel),sel);
+                            v=_mm256_xor_ps(v,_mm256_castsi256_ps(_mm256_and_si256(m,sgn)));
+                            ac[l&1]=_mm256_fmadd_ps(v,_mm256_loadu_ps(xs+off+l*8),ac[l&1]);
+                        }
+                    }
+                    __m256 t=_mm256_add_ps(ac[0],ac[1]);
+                    __m128 h=_mm_add_ps(_mm256_castps256_ps128(t),_mm256_extractf128_ps(t,1));
+                    h=_mm_add_ps(h,_mm_movehl_ps(h,h));
+                    h=_mm_add_ss(h,_mm_shuffle_ps(h,h,1));
+                    acc+=_mm_cvtss_f32(h);
+                    continue;
+                }
+#endif
                 for(int ib=0; ib<E8_QK/E8_SUB; ib++){
                     int off=base+ib*E8_SUB;
                     if(off>=I) break;

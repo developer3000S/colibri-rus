@@ -239,14 +239,18 @@ platform-specific native engine binary. Build the engine from source or point
 
 ### 2. Get the model
 
-A pre-converted **GLM-5.2 int4** container is on Hugging Face — **use the
-version with the int8 MTP heads**. It is about **372 GB**, so put it on a disk
-with the room, ideally a fast one:
+A pre-converted **GLM-5.2 int4** container is on Hugging Face — use the
+**group-scaled (gs64)** build with the **int8 MTP head**. It is about **372 GB**,
+so put it on a disk with the room, ideally a fast one:
 
-**https://huggingface.co/mateogrgic/GLM-5.2-colibri-int4-with-int8-mtp**
+**https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp**
 
-> ⚠️ The original mirror ships int4 MTP heads → 0% draft acceptance
-> ([#8](https://github.com/JustVugg/colibri/issues/8)). Check yours:
+> ⚠️ Use the **gs64** container above, not the older per-row int4 mirrors
+> (`mateogrgic/…`, `jlnsrk/…`): those measure ~9pp worse on quality and are the
+> root cause of the think-mode loops and never-terminating generations in
+> [#455](https://github.com/JustVugg/colibri/issues/455) — the gs64 container
+> cured every failing case there. The MTP head must also be **int8, not int4**
+> (int4 → 0% draft acceptance, [#8](https://github.com/JustVugg/colibri/issues/8)):
 > `ls -l <model>/out-mtp-*` — int8 (correct) is `3527131672 / 5366238584 / 1065950496`.
 
 Or convert from the FP8 source yourself — one resumable command that never needs

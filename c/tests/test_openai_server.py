@@ -15,9 +15,9 @@ from pathlib import Path
 from openai_server import (APIError, APIHandler, APIServer, ClientCancelled,
                            DEFAULT_CHAT_STOP_SEQUENCES, END, GenerationScheduler,
                            READY, Engine, InklingStreamSplit, StopFilter, ThinkingStreamSplit,
-                           _engine_error, default_engine, generation_options,
-                           parse_tool_calls, read_engine_turn, render_chat, serve,
-                           split_thinking_reply, stop_policy)
+                           _engine_error, conversation_cache_slot, default_engine,
+                           generation_options, parse_tool_calls, read_engine_turn,
+                           render_chat, serve, split_thinking_reply, stop_policy)
 
 
 class FakeEngine:
@@ -1547,6 +1547,48 @@ class KeepAliveFramingTest(unittest.TestCase):
         self.assertEqual(self._post(conn)[0], 200)
         self.assertEqual(self._post(conn)[0], 200)
         self.assertIsNotNone(conn.sock, "the JSON path should keep the connection open")
+
+
+class ConversationCacheSlotTest(unittest.TestCase):
+    """#634 Defect 1: a conversation must map to one stable KV slot across its turns."""
+
+    def _conv(self, *user_and_assistant_turns, system="you are a helpful assistant"):
+        messages = [{"role": "system", "content": system}]
+        for i, text in enumerate(user_and_assistant_turns):
+            messages.append({"role": "user" if i % 2 == 0 else "assistant", "content": text})
+        return messages
+
+    def test_single_slot_is_always_zero(self):
+        self.assertEqual(conversation_cache_slot(self._conv("hi"), 1), 0)
+
+    def test_empty_or_bad_input_is_zero(self):
+        self.assertEqual(conversation_cache_slot(None, 8), 0)
+        self.assertEqual(conversation_cache_slot([], 8), 0)
+
+    def test_slot_is_in_range(self):
+        for kv in (2, 3, 8, 16):
+            slot = conversation_cache_slot(self._conv("solve x"), kv)
+            self.assertTrue(0 <= slot < kv, f"slot {slot} out of range for kv={kv}")
+
+    def test_stable_across_turns_of_one_conversation(self):
+        # The engine caches the prefix; every turn of the same conversation must return
+        # the same slot so it lands on its warm KV instead of re-prefilling.
+        first_turn = self._conv("1+1=")
+        second_turn = self._conv("1+1=", "2", "and 2+2?")
+        third_turn = self._conv("1+1=", "2", "and 2+2?", "4", "thanks")
+        base = conversation_cache_slot(first_turn, 8)
+        self.assertEqual(conversation_cache_slot(second_turn, 8), base)
+        self.assertEqual(conversation_cache_slot(third_turn, 8), base)
+
+    def test_distinct_conversations_can_differ(self):
+        # Not a guarantee for any single pair (hashing collides sometimes), but across a
+        # spread of openings we must see more than one slot used, i.e. not everything on 0.
+        slots = {conversation_cache_slot(self._conv(f"task number {i}"), 8) for i in range(40)}
+        self.assertGreater(len(slots), 1)
+
+    def test_deterministic(self):
+        conv = self._conv("same question", "same answer", "again")
+        self.assertEqual(conversation_cache_slot(conv, 8), conversation_cache_slot(conv, 8))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import argparse
 import codecs
 import collections
 import contextlib
+import hashlib
 import json
 import math
 import mimetypes
@@ -862,6 +863,37 @@ def parse_stop_sequences(body):
     return tuple(sequences)
 
 
+def conversation_cache_slot(messages, kv_slots):
+    """Stable KV slot for a conversation so its turns reuse the same cached prefix.
+
+    The chat APIs are stateless: every turn resends the whole history, and the engine
+    caches each KV slot's prefix. When the client does not pin a `cache_slot`, the
+    scheduler falls back to `min(free_slots)`, which is blind to which slot already
+    holds this conversation. Under any interleaving of clients a turn can then land on
+    another conversation's slot and force a full re-prefill (#634, Defect 1). Hashing a
+    key that stays constant across a conversation's turns — the leading system messages
+    plus the first user message, which never change once the conversation has started —
+    routes every turn of one conversation to the same slot. Distinct conversations
+    spread across slots; when there are more live conversations than slots, colliding
+    ones degrade to the old re-prefill behaviour rather than to anything worse.
+
+    Returns a slot in [0, kv_slots). Falls back to 0 when there is nothing to key on.
+    """
+    if kv_slots <= 1 or not isinstance(messages, list) or not messages:
+        return 0
+    prefix = []
+    for message in messages:
+        prefix.append(message)
+        if isinstance(message, dict) and message.get("role") == "user":
+            break                 # first user turn reached: the key is now stable for the whole conversation
+    try:
+        key = json.dumps(prefix, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        key = repr(prefix)
+    digest = hashlib.sha1(key.encode("utf-8", "replace")).digest()
+    return int.from_bytes(digest[:8], "big") % kv_slots
+
+
 def stop_policy(body, chat):
     sequences = parse_stop_sequences(body)
     ignore_leading = body.get("x_colibri_ignore_leading_stop", False)
@@ -1566,7 +1598,16 @@ class APIHandler(BaseHTTPRequestHandler):
         if model != self.server.model_id:
             raise APIError(404, f"The model `{model}` does not exist.", "model", "model_not_found")
 
-    WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
+    # The dashboard ships in two layouts and the old single path only knew one:
+    # a source checkout puts this file in c/ (so web/dist is one level UP), while
+    # a release archive and an installed tree put it next to web/dist. Probing for
+    # index.html rather than the directory keeps an empty leftover web/dist from
+    # shadowing a real one.
+    WEB_DIST = next(
+        (c for c in (Path(__file__).resolve().parent / "web" / "dist",
+                     Path(__file__).resolve().parent.parent / "web" / "dist")
+         if (c / "index.html").is_file()),
+        Path(__file__).resolve().parent.parent / "web" / "dist")
 
     def serve_static(self, path):
         """Serve the built web UI (web/dist) so `coli web` is one process.
@@ -1734,6 +1775,13 @@ class APIHandler(BaseHTTPRequestHandler):
                  not 0 <= cache_slot < self.server.kv_slots)):
             raise APIError(400, f"`cache_slot` must be an integer between 0 and {self.server.kv_slots - 1}.",
                            "cache_slot")
+        if cache_slot is None and self.server.kv_slots > 1:
+            # #634: pin each conversation to a stable KV slot so multi-turn reuses its
+            # cached prefix instead of re-prefilling. Only when the request carries a
+            # conversation; raw /v1/completions keeps the scheduler's free-slot pick.
+            conversation = body.get("messages")
+            if isinstance(conversation, list) and conversation:
+                cache_slot = conversation_cache_slot(conversation, self.server.kv_slots)
         stream = body.get("stream", False)
         if not isinstance(stream, bool):
             raise APIError(400, "`stream` must be a boolean.", "stream")
@@ -2053,12 +2101,23 @@ class APIHandler(BaseHTTPRequestHandler):
     def anthropic_generation(self, body, prompt, request_id, tools, enable_thinking):
         maximum, temperature, top_p, grammar, _stop_sequences = generation_options(
             body, self.server.max_tokens)
+        # Same policy as /v1/chat/completions: `body` is the translated OpenAI-shaped
+        # request, and anthropic_messages() has already refused a client `stop_sequences`,
+        # so this resolves to the implicit GLM role boundaries.
+        stop_sequences, ignore_leading_stop = stop_policy(body, True)
         cache_slot = body.get("cache_slot")
         if (cache_slot is not None and
                 (isinstance(cache_slot, bool) or not isinstance(cache_slot, int) or
                  not 0 <= cache_slot < self.server.kv_slots)):
             raise APIError(400, f"`cache_slot` must be an integer between 0 and {self.server.kv_slots - 1}.",
                            "cache_slot")
+        if cache_slot is None and self.server.kv_slots > 1:
+            # #634: pin each conversation to a stable KV slot so multi-turn reuses its
+            # cached prefix instead of re-prefilling. Only when the request carries a
+            # conversation; raw /v1/completions keeps the scheduler's free-slot pick.
+            conversation = body.get("messages")
+            if isinstance(conversation, list) and conversation:
+                cache_slot = conversation_cache_slot(conversation, self.server.kv_slots)
         stream = body.get("stream", False)
         if not isinstance(stream, bool):
             raise APIError(400, "`stream` must be a boolean.", "stream")
@@ -2092,9 +2151,11 @@ class APIHandler(BaseHTTPRequestHandler):
             queue_headers = {"x-colibri-queue-wait-ms": str(round(queue_wait * 1000))}
             if not stream:
                 output = []
+                stop_filter = StopFilter(stop_sequences, output.append, ignore_leading_stop)
                 stats = self.server.engine.generate(
-                    prompt, maximum, temperature, top_p, output.append, cache_slot,
-                    self.client_disconnected, grammar=grammar)
+                    prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
+                    self.client_disconnected, grammar=grammar, stopped=stop_filter.stopped)
+                stop_filter.finish()
                 content, stop_reason = blocks_and_stop("".join(output), stats)
                 self.send_json(200, {
                     "id": message_id, "type": "message", "role": "assistant",
@@ -2211,9 +2272,11 @@ class APIHandler(BaseHTTPRequestHandler):
                 raw.append(chunk)
                 (split.feed if split else emit_answer)(chunk)
 
+            stop_filter = StopFilter(stop_sequences, on_text, ignore_leading_stop)
             stats = self.server.engine.generate(
-                prompt, maximum, temperature, top_p, on_text, cache_slot,
-                lambda: not connected[0], grammar=grammar)
+                prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
+                lambda: not connected[0], grammar=grammar, stopped=stop_filter.stopped)
+            stop_filter.finish()
             if split:
                 split.finish()
                 close_thinking()               # budget exhaustion before </think>

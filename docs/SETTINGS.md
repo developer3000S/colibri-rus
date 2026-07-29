@@ -37,6 +37,8 @@ Flags may also be given **after** the subcommand. Most flags map onto an engine 
 | `--ctx` | `0` (auto) | `CTX` | Context length. |
 | `--no-kv-save` | off | `KVSAVE=0` | Disable `.coli_kv` persistence to avoid SSD writes and start chat fresh. |
 | `--no-autopin` | off | `AUTOPIN=0` | Disable automatic hot-store pinning from usage history. |
+| `--no-persist` | off | `KVSAVE=0` | Disable runtime KV and usage-history persistence to reduce SSD writes. |
+| `--no-persistence` | off | `KVSAVE=0`, `AUTOPIN=0`, `COLI_PERSIST=0` | Disable runtime KV and usage-history persistence to reduce SSD writes. |
 | `--cap` | `8` | `<cap>` argv | Expert-cache cap (starting point; see `CAP_RAISE`). |
 | `--ngen` | `1024` | `NGEN` | Max tokens to generate. |
 | `--temp` | none (`0`=greedy; engine default 1.0) | `TEMP` | Sampling temperature. |

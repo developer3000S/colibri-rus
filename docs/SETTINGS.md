@@ -35,6 +35,8 @@ Flags may also be given **after** the subcommand. Most flags map onto an engine 
 | `--model` | `$COLI_MODEL` or built-in path | `SNAP` | Model snapshot directory. |
 | `--ram` | `0` (auto ≈ 88% free) | `RAM_GB` | RAM budget in GB for the expert working set. |
 | `--ctx` | `0` (auto) | `CTX` | Context length. |
+| `--no-kv-save` | off | `KVSAVE=0` | Disable `.coli_kv` persistence to avoid SSD writes and start chat fresh. |
+| `--no-autopin` | off | `AUTOPIN=0` | Disable automatic hot-store pinning from usage history. |
 | `--cap` | `8` | `<cap>` argv | Expert-cache cap (starting point; see `CAP_RAISE`). |
 | `--ngen` | `1024` | `NGEN` | Max tokens to generate. |
 | `--temp` | none (`0`=greedy; engine default 1.0) | `TEMP` | Sampling temperature. |
@@ -95,7 +97,7 @@ Run directly (or via `coli serve`). OpenAI-compatible `/v1/chat/completions`.
 | `--queue-timeout` | `$COLI_QUEUE_TIMEOUT` or `300` | Request queue timeout (s). |
 | `--kv-slots` | `$COLI_KV_SLOTS` or `1` | KV conversation slots. |
 
-Tool calling (`tools` in the request) is supported; the opt-in `COLI_TOOL_SALVAGE=1` env var recovers malformed int4 tool calls. Server-relevant env vars: `COLI_METAL`, `PIPE`, `DIRECT`, `COLI_NO_OMP_TUNE`, `RAM_GB`, `CTX`, `KVSAVE` (all from [ENVIRONMENT.md](ENVIRONMENT.md)) apply because the server launches the same `glm` engine.
+Tool calling (`tools` in the request) is supported; the opt-in `COLI_TOOL_SALVAGE=1` env var recovers malformed int4 tool calls. Server-relevant env vars: `COLI_METAL`, `PIPE`, `DIRECT`, `COLI_NO_OMP_TUNE`, `RAM_GB`, `CTX`, `KVSAVE`, `AUTOPIN` (all from [ENVIRONMENT.md](ENVIRONMENT.md)) apply because the server launches the same `glm` engine.
 
 ---
 
@@ -104,5 +106,5 @@ Tool calling (`tools` in the request) is supported; the opt-in `COLI_TOOL_SALVAG
 A flag and its mapped environment variable are two routes to the same engine knob. Precedence and coverage:
 
 - For knobs with a flag (`--temp`, `--ctx`, `--ram`, `--topk`, `--topp`, `--repin`, `--cap`, `--ngen`, `--policy`), prefer the flag — it's the supported surface.
-- For knobs with **no** flag (`COLI_METAL`, `PIPE`, `DIRECT`, `COLI_NO_OMP_TUNE`, `MLOCK`, `CAP_RAISE`, `KVSAVE`, `SEED`, `NUCLEUS`, …), export the environment variable.
+- For knobs with **no** flag (`COLI_METAL`, `PIPE`, `DIRECT`, `COLI_NO_OMP_TUNE`, `MLOCK`, `CAP_RAISE`, `KVSAVE`, `AUTOPIN`, `SEED`, `NUCLEUS`, …), export the environment variable.
 - The CLI copies your whole environment through to `glm`, so any variable you export is honored unless a flag explicitly overrides it.

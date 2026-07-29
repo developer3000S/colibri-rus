@@ -183,7 +183,22 @@ HIP       ?= 0
 ROCM_HOME ?= /opt/rocm
 HIPCC     ?= $(ROCM_HOME)/bin/hipcc
 HIP_ARCH  ?= native
-HIPCCFLAGS ?= -O3 -std=c++17 -x hip --offload-arch=$(HIP_ARCH) -Wall -Wextra
+# HIP_ARCH accepts a list (space- or comma-separated, e.g. "gfx906 gfx1030")
+# to fat-bundle several targets into one binary; COLI_GPUS picks at runtime.
+# `native` is resolved to the local GPUs' arch names HERE (not left to hipcc):
+# the NO_WMMA_ARCHS filter below must see real gfx names to know whether the
+# rocWMMA paths can compile at all. `override` beats command-line assignment.
+comma := ,
+override HIP_ARCH := $(subst $(comma), ,$(HIP_ARCH))
+ifeq ($(strip $(HIP_ARCH)),native)
+ifeq ($(HIP),1)
+override HIP_ARCH := $(shell $(ROCM_HOME)/bin/rocm_agent_enumerator 2>/dev/null | grep -v gfx000 | sort -u)
+ifeq ($(strip $(HIP_ARCH)),)
+$(error HIP_ARCH=native but rocm_agent_enumerator found no GPUs; set HIP_ARCH=gfxNNNN explicitly)
+endif
+endif
+endif
+HIPCCFLAGS ?= -O3 -std=c++17 -x hip $(foreach a,$(HIP_ARCH),--offload-arch=$(a)) -Wall -Wextra -fPIE
 GPUCC      = $(NVCC)
 GPUFLAGS   = $(NVCCFLAGS)
 GPUCC_NAME = nvcc (set CUDA_HOME or NVCC)
@@ -199,7 +214,7 @@ else
 PYTHON    ?= python3
 endif
 CUDA_OBJ  =
-TEST_BINS = tests/test_json$(EXE) tests/test_st$(EXE) tests/test_st_mirror$(EXE) tests/test_st_pread$(EXE) tests/test_tier$(EXE) tests/test_grammar$(EXE) tests/test_schema_gbnf$(EXE) tests/test_decode_batch$(EXE) tests/test_idot$(EXE) tests/test_i4_grouped$(EXE) tests/test_stops$(EXE) tests/test_topp$(EXE) tests/test_sample_nan$(EXE) tests/test_temp_env$(EXE) tests/test_tok_o200k$(EXE) tests/test_kv_alloc$(EXE) tests/test_int3$(EXE) tests/test_int3_load$(EXE) tests/test_i4_acc512$(EXE) tests/test_compat_direct$(EXE) tests/test_dsa_select$(EXE) tests/test_logit_nan$(EXE) tests/test_pipe_block$(EXE) tests/test_e8_kernel$(EXE)
+TEST_BINS = tests/test_json$(EXE) tests/test_st$(EXE) tests/test_st_mirror$(EXE) tests/test_st_pread$(EXE) tests/test_tier$(EXE) tests/test_grammar$(EXE) tests/test_schema_gbnf$(EXE) tests/test_decode_batch$(EXE) tests/test_idot$(EXE) tests/test_i4_grouped$(EXE) tests/test_stops$(EXE) tests/test_topp$(EXE) tests/test_sample_nan$(EXE) tests/test_temp_env$(EXE) tests/test_tok_o200k$(EXE) tests/test_kv_alloc$(EXE) tests/test_int3$(EXE) tests/test_int3_load$(EXE) tests/test_i4_acc512$(EXE) tests/test_compat_direct$(EXE) tests/test_dsa_select$(EXE) tests/test_logit_nan$(EXE) tests/test_router_nan$(EXE) tests/test_pipe_block$(EXE) tests/test_e8_kernel$(EXE) tests/test_rans$(EXE)
 ifneq (,$(LINUX))
 TEST_BINS += tests/test_uring$(EXE)
 endif
@@ -227,6 +242,7 @@ endif
 CFLAGS   += -DCOLI_CUDA
 LDFLAGS  += -L$(CUDA_HOME)/lib64 -Wl,-rpath,$(CUDA_HOME)/lib64 -lcudart -lstdc++
 CUDA_OBJ  = backend_cuda.o
+INK_CUDA_OBJ = backend_cuda_ink.o
 endif
 
 ifeq ($(HIP),1)
@@ -239,6 +255,23 @@ CUDA_OBJ   = backend_cuda.o
 GPUCC      = $(HIPCC)
 GPUFLAGS   = $(HIPCCFLAGS)
 GPUCC_NAME = hipcc (set ROCM_HOME or HIPCC)
+# rocWMMA needs matrix cores (MFMA gfx908+ / WMMA gfx11xx); on these archs its
+# headers static_assert (ROCm/TheRock#1944). Compile the WMMA paths out and
+# let backend_gpu_compat.h fall back via COLI_GPU_HAS_WMMA=0. The flag must
+# reach both hipcc passes, hence a compile define, not an arch macro. If a
+# HIP_ARCH=native build dies inside rocwmma, set the arch explicitly.
+NO_WMMA_ARCHS = gfx803 gfx900 gfx902 gfx904 gfx906 gfx90c \
+                gfx1010 gfx1011 gfx1012 gfx1013 \
+                gfx1030 gfx1031 gfx1032 gfx1033 gfx1034 gfx1035 gfx1036 gfx1103
+ifneq (,$(filter $(HIP_ARCH),$(NO_WMMA_ARCHS)))
+HIPCCFLAGS += -DCOLI_HIP_NO_WMMA
+# The define must hold for every arch in the fat binary (host dispatch is
+# shared), so one incapable arch disables the WMMA kernels for all of them.
+# Loud, because on a WMMA-capable card that is a real capability loss.
+ifneq (,$(filter-out $(NO_WMMA_ARCHS),$(HIP_ARCH)))
+$(warning mixed HIP_ARCH list: $(filter $(HIP_ARCH),$(NO_WMMA_ARCHS)) cannot run rocWMMA -> tensor-core kernels disabled for ALL targets ($(HIP_ARCH)). Build separate binaries to keep WMMA on the capable card.)
+endif
+endif
 endif
 
 # METAL=1 adds an opt-in Apple-GPU backend (macOS only). The shader is compiled at
@@ -300,6 +333,10 @@ cuda-dll: backend_cuda.cu backend_cuda.h
 		-L"$(CUDA_HOME)/lib/x64" -lcudart \
 		backend_cuda.cu -o coli_cuda.dll
 
+backend_cuda_ink.o: backend_cuda_ink.cu backend_cuda_ink.h .build-config
+	@command -v "$(NVCC)" >/dev/null 2>&1 || { echo "nvcc not found: set CUDA_HOME or NVCC" >&2; exit 1; }
+	"$(NVCC)" $(NVCCFLAGS) -c backend_cuda_ink.cu -o $@
+
 backend_cuda.o: backend_cuda.cu backend_cuda.h backend_gpu_compat.h .build-config
 	@command -v "$(GPUCC)" >/dev/null 2>&1 || { echo "$(GPUCC_NAME) not found" >&2; exit 1; }
 	"$(GPUCC)" $(GPUFLAGS) -c backend_cuda.cu -o $@
@@ -310,6 +347,43 @@ backend_metal.o: backend_metal.mm backend_metal.h
 metal-test: tests/test_backend_metal.mm backend_metal.mm backend_metal.h
 	$(METALXX) tests/test_backend_metal.mm backend_metal.mm -framework Metal -framework Foundation -o backend_metal_test
 	./backend_metal_test
+
+# Standalone large-batch GEMM correctness sweep — reproduces the long-context prefill
+# corruption in seconds (no model). OMP-parallel CPU reference.
+gemm-test: tests/test_gemm_largebatch.mm backend_metal.mm backend_metal.h
+	$(METALXX) $(OMPC) tests/test_gemm_largebatch.mm backend_metal.mm $(OMPL) -framework Metal -framework Foundation -o gemm_largebatch_test
+	./gemm_largebatch_test
+
+# fmt=6 (E8/IQ3) encoder for tools/convert_fp8_to_int4.py. OPTIONAL: iq3_pack.py
+# falls back to its numpy path when the library is absent, producing the same
+# bytes ~13x slower. Uses the same ARCH as the engine, so an AVX2 host gets the
+# SIMD search and anything else compiles the scalar fallback.
+ifneq (,$(DARWIN))
+IQ3LIB = tools/libiq3.dylib
+else ifneq ($(IS_WIN),)
+IQ3LIB = tools/iq3.dll
+else
+IQ3LIB = tools/libiq3.so
+endif
+iq3: $(IQ3LIB)
+$(IQ3LIB): tools/iq3_encode.c
+	$(CC) $(CFLAGS) -fPIC -shared $< -o $@ $(LDFLAGS)
+
+# int4-rans256-g0 codec bridge for tools/repack_rans.py + tools/rans_verify.py.
+# OPTIONAL: both tools fall back to a pure-Python codec producing the same
+# bytes far more slowly when the library is absent (fine for tests, not for a
+# real repack). Same ARCH story as the engine: an AVX-512/NEON host gets the
+# batched vector decoder, anything else the scalar paths.
+ifneq (,$(DARWIN))
+RANSLIB = tools/librans_c.dylib
+else ifneq ($(IS_WIN),)
+RANSLIB = tools/rans_c.dll
+else
+RANSLIB = tools/librans_c.so
+endif
+rans: $(RANSLIB)
+$(RANSLIB): tools/rans_ctypes.c rans.h
+	$(CC) $(CFLAGS) -fPIC -shared $< -o $@ $(LDFLAGS)
 
 cuda-test: backend_cuda.cu backend_cuda.h backend_gpu_compat.h tests/test_backend_cuda.cu
 	@command -v "$(GPUCC)" >/dev/null 2>&1 || { echo "$(GPUCC_NAME) not found" >&2; exit 1; }
@@ -332,6 +406,9 @@ cuda-bench: backend_cuda.cu backend_cuda.h backend_gpu_compat.h tests/bench_tens
 
 olmoe$(EXE): olmoe.c st.h json.h compat.h
 	$(CC) $(CFLAGS) olmoe.c -o olmoe$(EXE) $(LDFLAGS)
+
+inkling$(EXE): inkling.c st.h json.h compat.h $(INK_CUDA_OBJ)
+	$(CC) $(CFLAGS) inkling.c $(INK_CUDA_OBJ) -o inkling$(EXE) $(LDFLAGS)
 
 # Use a baseline that matches the compiler target. macOS already targets a
 # portable baseline when ARCH is empty; forcing the x86 value there breaks
@@ -412,6 +489,21 @@ tests/test_kv_alloc$(EXE): tests/test_kv_alloc.c colibri.c st.h json.h tok.h tok
 tests/test_e8_kernel$(EXE): tests/test_e8_kernel.c quant.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
+tests/test_rans$(EXE): tests/test_rans.c rans.h
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+# Structured-mutation fuzz for the rans record parser/decoder under
+# ASan+UBSan — seeded and bounded (a few thousand mutants, well under a
+# minute), asserting no sanitizer report and byte identity across every
+# compiled decode arm on every accepted record. NOT a test gate (sanitizer
+# flags differ from the normal build); build+run on demand:
+#   make fuzz-rans
+fuzz-rans: tests/fuzz_rans.c rans.h
+	$(CC) -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+	  -Wall -Wextra -Wno-unused-parameter -Wno-unused-function \
+	  tests/fuzz_rans.c -o tests/fuzz_rans -lm
+	./tests/fuzz_rans
+
 tests/test_int3$(EXE): tests/test_int3.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h quant.h sample.h kv_persist.h telemetry.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
@@ -419,6 +511,9 @@ tests/test_int3_load$(EXE): tests/test_int3_load.c colibri.c st.h uring.h json.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 tests/test_logit_nan$(EXE): tests/test_logit_nan.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+
+tests/test_router_nan$(EXE): tests/test_router_nan.c colibri.c st.h uring.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 tests/test_i4_acc512$(EXE): tests/test_i4_acc512.c
@@ -454,7 +549,12 @@ tests/test_pipe_block$(EXE): tests/test_pipe_block.c colibri.c st.h uring.h json
 test-c: $(TEST_BINS)
 	$(PYTHON) tools/run_tests.py $(TEST_BINS)
 
-test-python:
+# test-python builds the rans ctypes bridge first: without it the repack e2e
+# test's C-vs-Python byte-identity pin would silently compare Python against
+# itself (the test ALSO skips loudly if the library is somehow still absent,
+# e.g. when invoked via unittest directly — but a green `make test` must mean
+# the pin was actually checked).
+test-python: $(RANSLIB)
 	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'
 
 test: test-c test-python
@@ -495,8 +595,17 @@ install: colibri$(EXE) olmoe$(EXE)
 	$(INSTALL) -m 755 coli $(DESTDIR)$(BINDIR)/coli
 	$(INSTALL) -m 755 colibri$(EXE) $(DESTDIR)$(LIBEXECDIR)/colibri$(EXE)
 	$(INSTALL) -m 755 olmoe$(EXE) $(DESTDIR)$(LIBEXECDIR)/olmoe$(EXE)
-	$(INSTALL) -m 644 resource_plan.py doctor.py openai_server.py $(DESTDIR)$(LIBEXECDIR)/
+	$(INSTALL) -m 644 resource_plan.py doctor.py openai_server.py version.py $(DESTDIR)$(LIBEXECDIR)/
 	$(INSTALL) -m 644 tools/*.py $(DESTDIR)$(LIBEXECDIR)/tools/
+	@# The dashboard is an optional build artifact (cd web && npm run build), so install
+	@# it only when it exists. It goes NEXT TO openai_server.py, which probes ./web/dist.
+	@if [ -f ../web/dist/index.html ]; then \
+	  $(INSTALL) -d $(DESTDIR)$(LIBEXECDIR)/web/dist; \
+	  cp -R ../web/dist/. $(DESTDIR)$(LIBEXECDIR)/web/dist/; \
+	  echo "installed the web dashboard"; \
+	else \
+	  echo "web/dist absent -- skipping the dashboard (build it with: cd web && npm run build)"; \
+	fi
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/coli
@@ -507,4 +616,4 @@ clean:
 
 bench: iobench$(EXE)
 	@if [ -n "$(ARGS)" ]; then ./iobench$(EXE) $(ARGS); else echo "built iobench$(EXE) — run: ./iobench$(EXE) <file> <MB> <iters> <threads> <direct 0|1>"; fi
-.PHONY: all colibri glm cuda-test hip-test gpu-compile cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench
+.PHONY: all colibri glm iq3 rans fuzz-rans cuda-test hip-test gpu-compile cuda-bench cuda-dll portable test-c test-python test check clean install uninstall bench

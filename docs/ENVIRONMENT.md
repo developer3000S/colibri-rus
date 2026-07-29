@@ -173,6 +173,7 @@ These are read by the Python programs (not the `glm` engine), so they don't appe
 | `COLI_MODEL` | unset | Default model directory (fallback for `--model`). |
 | `COLI_MODEL_ID` | `glm-5.2-colibri` | Model id reported by the API. |
 | `COLI_API_KEY` | unset | Required bearer token for the server. |
+| `COLI_ALLOWED_HOSTS` | unset | Comma-separated hostnames or IP addresses accepted by the DNS-rebinding guard in addition to loopback and the bind address. Equivalent to repeating `--allowed-host`. |
 | `COLI_MAX_QUEUE` | `8` | Max queued requests. |
 | `COLI_QUEUE_TIMEOUT` | `300` | Seconds a request may wait in the queue. |
 | `COLI_KV_SLOTS` | `1` | Independent KV conversation slots (→ engine `KV_SLOTS`). |

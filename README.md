@@ -9,15 +9,26 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><b>Website</b></a> ·
+  <a href="https://discord.gg/fpQxKnRb"><b>Discord</b></a> ·
   English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.it.md">Italiano</a>
 </p>
 
-**Tiny engine, immense model.** Run **GLM-5.2 (744B-parameter MoE)** on a consumer machine with ~25 GB of RAM — in pure C, with zero dependencies, by streaming experts from disk.
+**Tiny engine, immense model.** Explore **GLM-5.2 (744B-parameter MoE)** across
+consumer and heterogeneous hardware — in pure C, with zero engine dependencies,
+by treating storage, RAM, and VRAM as one inference hierarchy.
 
-Colibrì is a lightweight, quality-preserving MoE runtime that treats VRAM, RAM,
-and storage as one managed memory hierarchy. Insufficient fast memory may reduce
-speed, but the default policy **never silently changes model precision or router
-semantics**.
+> **Colibrì is an experimental inference engine and research platform.** Its
+> primary goal is to pursue inference-side performance across the entire
+> software/hardware boundary — model formats, memory hierarchy, storage I/O,
+> placement, scheduling, kernels, speculation, and CPU/GPU overlap — so large
+> models depend less on scarce hardware and cost less to run.
+
+Colibrì treats VRAM, RAM, and storage as one managed memory hierarchy. It is
+deliberately a place to test aggressive systems ideas, not a production runtime
+with an SLA. Experiments must earn their place through reproducible end-to-end
+measurements, and the default policy **never silently changes model precision
+or router semantics**. Insufficient fast memory may reduce speed; it must not
+quietly redefine the model.
 
 ```
 $ ./coli chat
@@ -50,15 +61,71 @@ brightness is routing heat, and every expert routed in a turn flashes white. Hov
 as a 3-D galaxy — 13,260 characterised experts, 1,041 replicated specialists clustering by topic
 (poetry, law, Chinese, SQL…). Position is measured routing affinity, not a learned embedding. Drag to spin.</em></p>
 
-## The vision
+## The research mission
 
-Frontier models should not be sealed inside datacenters. colibrì exists so that
-**anyone curious enough can open one up**: run a 744B-parameter mind on hardware
-you already own, watch every expert fire in real time, and change the code that
-does it. Not renting intelligence behind an API — *holding* it: probing it,
-measuring it, improving it. Every optimisation in this project started with
-someone measuring something on their own machine; the engine is deliberately
-small enough that the next one can come from you.
+Frontier inference should not require datacenter-class hardware by default.
+Colibrì's research target is simple: **reduce the hardware dependency and total
+cost of inference by optimizing every part of the inference path that evidence
+shows is limiting it**.
+
+That includes changing how weights are represented and moved, deciding what
+lives in VRAM, RAM, or storage, overlapping heterogeneous compute, reducing
+launch and synchronization overhead, exploiting sparsity and reuse, and testing
+new decoding algorithms. Nothing is protected merely because it is conventional;
+nothing is adopted merely because a microbenchmark looks fast. The deciding
+result is end-to-end inference on real machines, with correctness and quality
+measured alongside throughput, latency, memory, and cost.
+
+The practical consequence is accessibility: run a 744B-parameter model on
+hardware you already own, watch every expert fire in real time, and change the
+code that does it. Not renting intelligence behind an API — *holding* it:
+probing it, measuring it, improving it. The engine is deliberately small enough
+that the next useful optimization can come from anyone willing to measure it.
+
+## Core techniques and measured findings
+
+- **One hierarchy, not one memory threshold.** VRAM, RAM, and NVMe are placement
+  tiers for the same weights; limited fast memory changes speed, not model semantics.
+- **A JIT for weights.** Measured routing heat drives a per-layer LRU, a learned
+  pinned hot-store, and one-layer-ahead prefetch instead of loading every expert.
+  It wins on repeatable workloads; history can overfit, and lookahead can lose on
+  some hosts, so both remain measurable policies rather than promises.
+- **I/O is part of the engine.** Batched expert unions, overlapped reads and
+  compute, `O_DIRECT`, and weighted dual-SSD striping attack the streaming path
+  rather than pretending storage latency is free. `O_DIRECT` is drive-dependent,
+  and dual-SSD still needs broader end-to-end community A/Bs.
+- **Heterogeneous execution.** CPU, CUDA, Metal, NUMA memory, and partial or full
+  expert residency share one runtime and can be combined according to the machine;
+  the profitable combination depends on compute, bandwidth, residency, and workload.
+- **Compressed state without a different model.** Token-exact forward validation,
+  57× smaller MLA KV state, persistent warm conversations, and faithful DSA keep
+  optimization tied to correctness. These are memory, latency, and correctness
+  properties — not a blanket throughput claim.
+- **Speculation that must earn its keep.** Native MTP and grammar-forced drafts
+  are measured end to end and can be disabled when acceptance does not repay verification.
+
+## Open hypotheses, experiments, and how to help
+
+Colibrì treats an optimization as a hypothesis until a controlled end-to-end A/B
+shows otherwise. These are the main questions now:
+
+| hypothesis | evidence so far | experiment still needed |
+|---|---|---|
+| Routing history can place experts better than plain LRU | learned pins improve repeated workloads, but can overfit a prompt | held-out, cross-session A/Bs across coding, chat, multilingual, and long-context workloads |
+| Multiple SSDs can turn independent bandwidth into decode speed | weighted mirror/split routing is implemented and validated; the bandwidth model is sound | cold-cache one-drive vs two-drive GLM-5.2 runs on real, independent controllers |
+| A hardware-aware planner can approach each machine's best configuration automatically | RAM/VRAM budgets and several backends are detected today | compare the generated plan with a controlled parameter sweep across laptops, workstations, NUMA hosts, and multi-GPU systems |
+| Lossless or quality-bounded representations can reduce weight movement enough to matter | format and quantization ablations exist, with correctness/quality gates | reproduce quality, bytes moved, latency, and cost per useful token together — not compression ratio alone |
+| Routing-aware speculation can pay before near-full residency | MTP and grammar drafts work, but MTP has also measured a 32% loss around 85% expert hit | map the break-even surface across acceptance, expert hit rate, batch union, and draft depth |
+| CPU/GPU overlap can hide transfer and synchronization rather than merely move the bottleneck | CUDA and Metal wins exist, but fast CPUs and low residency can erase them | per-stage profiles and one-variable A/Bs across PCIe, unified-memory, and full-resident machines |
+
+Want to help? Pick one row and publish the negative results too. Record the
+hardware, commit, model/container, exact command, prompt, cache state, throughput,
+TTFT, expert hit rate, bytes read, and quality check; change one variable, repeat
+the run, and attach raw logs. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md), compare against
+[the benchmark protocol](docs/benchmarks.md), then
+[open an experiment issue](https://github.com/JustVugg/colibri/issues/new).
+A well-controlled failure is more valuable here than an unexplained fast number.
 
 ## The idea
 
@@ -236,14 +303,19 @@ engine still lives in `c/` — an editable install from the clone, not a wheel).
 
 ### 2. Get the model
 
-A pre-converted **GLM-5.2 int4** container is on Hugging Face — **use the
-version with the int8 MTP heads**. It is about **372 GB**, so put it on a disk
-with the room, ideally a fast one:
+A pre-converted **GLM-5.2 int4** container is on Hugging Face — use the
+**group-scaled (gs64)** build with the **int8 MTP head**. It is about **372 GB**,
+so put it on a disk with the room, ideally a fast one:
 
-**https://huggingface.co/mateogrgic/GLM-5.2-colibri-int4-with-int8-mtp**
+**https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp**
 
-> ⚠️ The original mirror ships int4 MTP heads → 0% draft acceptance
-> ([#8](https://github.com/JustVugg/colibri/issues/8)). Check yours:
+> ⚠️ Use the **gs64** container above, not the older per-row int4 mirrors
+> (`mateogrgic/…`, `jlnsrk/…`): those measure ~9pp worse on quality and are the
+> root cause of the original think-mode loops and never-terminating generations
+> in [#455](https://github.com/JustVugg/colibri/issues/455). The gs64 container
+> fixed those controlled per-row A/Bs, but it is not a general repetition or
+> EOS-starvation guard. The MTP head must also be **int8, not int4**
+> (int4 → 0% draft acceptance, [#8](https://github.com/JustVugg/colibri/issues/8)):
 > `ls -l <model>/out-mtp-*` — int8 (correct) is `3527131672 / 5366238584 / 1065950496`.
 
 Or convert from the FP8 source yourself — one resumable command that never needs
@@ -259,6 +331,7 @@ the full 756 GB on disk at once:
 COLI_MODEL=/nvme/glm52_i4 ./coli chat     # RAM budget, cache and MTP auto-detected
 COLI_MODEL=/nvme/glm52_i4 ./coli plan     # inspect the planned VRAM/RAM/disk placement
 COLI_MODEL=/nvme/glm52_i4 ./coli doctor   # read-only readiness check
+COLI_MODEL=/nvme/glm52_i4 ./coli doctor --deep  # strict tensors/shards/index/mirror preflight
 ./coli web  --model /nvme/glm52_i4        # API + web dashboard on one port
 ./coli serve --model /nvme/glm52_i4       # OpenAI-compatible API only
 ```
@@ -282,11 +355,12 @@ and the optional API gateway.
 
 ## What's next
 
-- **Algorithmic research is active.** The current hierarchy is LRU + a learned
-  pin set; the next step is under way — smarter placement and scheduling,
-  overlap of CPU and GPU expert execution, and routing-aware speculation.
-  Everything lands the way this project always works: measured, reviewed, and
-  merged in the open.
+- **Inference-systems research is the product.** The current hierarchy is LRU +
+  a learned pin set; active work spans model formats, compression, placement,
+  scheduling, I/O, CPU/GPU kernels, heterogeneous overlap, KV state, and
+  routing-aware speculation. The objective is lower hardware requirements and
+  lower cost per useful token. Everything lands the way this project works:
+  measured end to end, reviewed, and developed in the open.
 - **More open models.** The tiering algorithm is model-agnostic: any MoE with
   routed experts can be staged the same way. GLM-5.2 and OLMoE run today;
   support for more open-weight families — **Kimi K2** (Moonshot AI),
@@ -300,6 +374,8 @@ today its numbers come from a community of real machines. If it's useful to you:
 - ⭐ star the repo and share it;
 - 🐛 open issues with benchmark numbers from your hardware — datapoints move
   this project more than anything else;
+- 💬 join the [Discord community](https://discord.gg/fpQxKnRb) to discuss
+  experiments, hardware results, and research directions;
 - 💬 reach out via GitHub issues to sponsor development or donate hardware.
 
 ## Repo layout

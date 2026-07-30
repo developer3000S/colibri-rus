@@ -29,9 +29,15 @@ int  coli_metal_mem_info(size_t *used_bytes, size_t *total_bytes);
 /*
  * y[S,O] = (x[S,I] @ W[O,I]^T) * scale[o]. fmt=4 (grouped int4) instead folds a
  * PER-GROUP scale into the accumulation -- see the shader comment in backend_metal.mm.
+ * fmt=8 (fp8 passthrough -- see colibri.c) likewise folds its per-128x128-block
+ * scale into the accumulation.
  * fmt matches QT in colibri.c: 0=f32, 1=int8, 2=int4(packed), 3=int2(packed),
  * 4=int4(packed, same layout as 2)+per-group scale (gs = group size along I; scale
- * array is [O, ceil(I/gs)] floats instead of [O]). gs is ignored for fmt!=4 (pass 0).
+ * array is [O, ceil(I/gs)] floats instead of [O]),
+ * 8=fp8-e4m3 (one raw byte/element, same layout as fmt=1) + per-128x128-
+ * block scale (scale array is [ceil(O/128),ceil(I/128)] floats; no group-size
+ * parameter needed -- the block is a fixed 128x128, not caller-configurable).
+ * gs is ignored for fmt!=4 (pass 0).
  * The first successful call wraps W and its scales in GPU-visible buffers (sized from
  * fmt+gs); later calls reuse them (weights are assumed stable at the same address).
  * Returns 1 on success, 0 if Metal is unavailable or fmt is invalid.

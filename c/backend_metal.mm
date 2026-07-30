@@ -13,6 +13,16 @@
 // nibble layout as fmt=2, but scale is PER-GROUP (gsz elements of I), buffer(1) holds
 // [O, ceil(I/gsz)] floats indexed scale[o*ng+g] -- so unlike fmt 1-3, the group scale is
 // folded into the accumulation itself (see the fmt==4 branch), not applied once at the end.
+// fmt=8 (native FP8-e4m3 passthrough -- see colibri.c): raw byte
+// layout identical to fmt=1 (one e4m3 byte per element, no packing), but the scale is
+// per-128x128 BLOCK of [O,I] -- buffer(1) holds [ceil(O/128),ceil(I/128)] floats indexed
+// scale[(o/128)*nblkI+i/128]. Folded into acc like fmt=4's per-group scale, for the
+// same reason: it is not constant across one output row. e4m3->float is bit manipulation
+// in-kernel (sign/exp/mantissa, OCP E4M3-FN: exp==0 subnormal, exp==0xF&&mant==0x7 is the
+// only NaN code) -- BW-bound kernel, decode ALU is free, no LUT texture. Must byte-match
+// quant.h's E4M3_LUT/e4m3_decode (the CPU reference) including the NaN policy, which is
+// why the metal-test suite runs all 256 byte codes through this exact kernel path (not
+// just spot values) -- see run_fp8_lut().
 static const char *SHADER = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
@@ -75,6 +85,25 @@ kernel void mm_gemv(device const uchar* w      [[buffer(0)]],   // raw weight by
         acc += float(int(b>>4)-8) * xr[i+1] * sc1;
       }
     }
+  } else if (fmt == 8) {                            // fp8 e4m3 passthrough: one raw byte per
+                                                     // element (like fmt=1), scale per 128x128
+                                                     // block folded into acc (like a grouped fmt).
+    int nblkI = (I + 127) / 128;
+    device const uchar* wr = w + (long)o * I;
+    device const float* scl = scale + (long)(o/128) * nblkI;
+    for (int i = slane; i < I; i += 32) {
+      uchar b = wr[i];
+      uint sign = b >> 7, exp = (b >> 3) & 0xF, mant = b & 0x7;
+      float wv;
+      if (exp == 0xF && mant == 0x7) {
+        wv = as_type<float>(0x7fc00000u);           // qNaN -- matches quant.h's e4m3_decode
+      } else {
+        float mag = (exp == 0) ? (float(mant) * 0.001953125f)                 // subnormal: mant*2^-9
+                                : (1.0f + float(mant)*0.125f) * exp2(float(int(exp) - 7));
+        wv = sign ? -mag : mag;
+      }
+      acc += wv * xr[i] * scl[i/128];
+    }
   } else {                                          // f32
     device const float* wr = (device const float*)(w) + (long)o * I;
     device const float4* w4 = (device const float4*)wr;
@@ -82,8 +111,9 @@ kernel void mm_gemv(device const uchar* w      [[buffer(0)]],   // raw weight by
     for (int i = I8*8 + slane; i < I; i += 32) acc += wr[i] * xr[i];
   }
   acc = simd_sum(acc);
-  // fmt==4 already folded the per-group scale into acc above -- do not scale again.
-  if (slane == 0) y[row] = (fmt == 4) ? acc : acc * scale[o];
+  // fmt==4 (per-group) and fmt==8 (per-block) already folded their scale into acc
+  // above -- do not scale again.
+  if (slane == 0) y[row] = (fmt == 4 || fmt == 8) ? acc : acc * scale[o];
 }
 
 // Batched bindless expert GEMV: each row gr belongs to expert erow[gr], whose weight and
@@ -447,11 +477,20 @@ static size_t fmt_bytes(int fmt, int I, int O) {
   if (fmt == 2) return (size_t)O * ((I+1)/2);
   if (fmt == 3) return (size_t)O * ((I+3)/4);
   if (fmt == 4) return (size_t)O * ((I+1)/2);   // grouped int4: identical packed-nibble layout to fmt=2
+  if (fmt == 8) return (size_t)O * I;           // fp8 e4m3: one raw byte/element, same as fmt=1
   return (size_t)O * I * sizeof(float);
 }
 // Grouped-int4 (fmt=4) scale-array size: one f32 per gsz-element group, per row -> O*ceil(I/gsz).
+// fp8 (fmt=8) scale-array size: one f32 per 128x128 BLOCK -> ceil(O/128)*ceil(I/128) (2D,
+// not per-row -- quant.h isn't included here, so the ceil-div is inlined rather than sharing
+// colibri.c's qt_scale_bytes/quant.h's fp8_nblk). The block is a fixed 128x128, so gs is
+// ignored for fmt==8. f32 is this build's implemented scale
+// ENCODING for fmt=8 (see quant.h/colibri.c) -- this file has no reason to know that a
+// UE8M0 encoding exists at all: qt_resolve_fmt refuses it on the CPU read path before any
+// tensor in that encoding could ever reach this Metal-side sizing helper.
 static size_t fmt_scale_bytes(int fmt, int I, int O, int gs) {
   if (fmt == 4) return (size_t)O * ((I + gs - 1) / gs) * sizeof(float);
+  if (fmt == 8) return (size_t)((O + 127) / 128) * (size_t)((I + 127) / 128) * sizeof(float);
   return (size_t)O * sizeof(float);
 }
 
@@ -619,7 +658,9 @@ extern "C" int  coli_metal_mem_info(size_t *used, size_t *total) {
 extern "C" int coli_metal_matmul(ColiMetalTensor **tp, float *y, const float *x,
                                  const void *weights, const float *scales,
                                  int fmt, int S, int I, int O, int gs) {
-  if (!g_dev || fmt < 0 || fmt > 4) return 0;
+  /* fmt==8 (fp8 passthrough) is an explicit allow-list entry, not folded into the 0..4
+   * contiguous range check below: it is not adjacent to it. */
+  if (!g_dev || fmt < 0 || (fmt > 4 && fmt != 8)) return 0;
   @autoreleasepool {
     ColiMetalTensor *t = *tp;
     if (!t) {

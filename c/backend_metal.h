@@ -68,14 +68,14 @@ void coli_metal_unregister(void *base);
  */
 int coli_metal_layer_decode(float *x,
     const float *in_ln, const float *post_ln,
-    const void *qa_w, const float *qa_s, int qa_fmt, const float *qa_ln,
-    const void *qb_w, const float *qb_s, int qb_fmt,
-    const void *kva_w, const float *kva_s, int kva_fmt, const float *kva_ln,
-    const void *kvb_w, const float *kvb_s, int kvb_fmt,
-    const void *o_w, const float *o_s, int o_fmt,
-    const void *shg_w, const float *shg_s, int shg_fmt,
-    const void *shu_w, const float *shu_s, int shu_fmt,
-    const void *shd_w, const float *shd_s, int shd_fmt,
+    const void *qa_w, const float *qa_s, int qa_fmt, int qa_gs, const float *qa_ln,
+    const void *qb_w, const float *qb_s, int qb_fmt, int qb_gs,
+    const void *kva_w, const float *kva_s, int kva_fmt, int kva_gs, const float *kva_ln,
+    const void *kvb_w, const float *kvb_s, int kvb_fmt, int kvb_gs,
+    const void *o_w, const float *o_s, int o_fmt, int o_gs,
+    const void *shg_w, const float *shg_s, int shg_fmt, int shg_gs,
+    const void *shu_w, const float *shu_s, int shu_fmt, int shu_gs,
+    const void *shd_w, const float *shd_s, int shd_fmt, int shd_gs,
     const float *router_w, const float *router_bias,
     int E, int K, int Ksel, float topp, int normk, float rscale,
     float *Lc, float *Rc, int S, int pos_base, int st0,
@@ -104,11 +104,11 @@ int coli_metal_rtop8(int par, const float *sig, const float *bias, int S, int E,
 void coli_metal_attn_counts(uint64_t *ok, double *wall, double *kernel);
 void coli_metal_attn_lat(double *ksched, double *gsched);
 int coli_metal_attn_decode(const float *x,
-    const void *qa_w, const float *qa_s, int qa_fmt, const float *qa_ln,
-    const void *qb_w, const float *qb_s, int qb_fmt,
-    const void *kva_w, const float *kva_s, int kva_fmt, const float *kva_ln,
-    const void *kvb_w, const float *kvb_s, int kvb_fmt,
-    const void *o_w, const float *o_s, int o_fmt,
+    const void *qa_w, const float *qa_s, int qa_fmt, int qa_gs, const float *qa_ln,
+    const void *qb_w, const float *qb_s, int qb_fmt, int qb_gs,
+    const void *kva_w, const float *kva_s, int kva_fmt, int kva_gs, const float *kva_ln,
+    const void *kvb_w, const float *kvb_s, int kvb_fmt, int kvb_gs,
+    const void *o_w, const float *o_s, int o_fmt, int o_gs,
     float *Lc, float *Rc, int S, int pos_base, int st0, float eps, float theta, float ascale, float *out);
 
 /* Diagnostics: GPU blocks executed, CPU-fallback blocks, experts run on GPU. */
@@ -135,7 +135,7 @@ int coli_metal_resset_stats(double *flush_s);
  *  out         = [S, D] accumulate target
  * Returns 1 on success, 0 to signal the caller to fall back to the CPU path.
  */
-int coli_metal_moe_block(int nb, int D, int Iinter, int fmt,
+int coli_metal_moe_block(int nb, int D, int Iinter, int fmt, int qgs,
                          const void *const *g, const void *const *u, const void *const *d,
                          const float *const *gs, const float *const *us, const float *const *ds,
                          const float *xg, const int *xoff, const int *nr,
@@ -150,7 +150,7 @@ int coli_metal_moe_block(int nb, int D, int Iinter, int fmt,
  * end returns 0 on GPU fault (caller redoes those experts on CPU).
  */
 typedef struct ColiMetalMoeHandle ColiMetalMoeHandle;
-ColiMetalMoeHandle* coli_metal_moe_block_begin(int nb, int D, int Iinter, int fmt,
+ColiMetalMoeHandle* coli_metal_moe_block_begin(int nb, int D, int Iinter, int fmt, int qgs,
                          const void *const *g, const void *const *u, const void *const *d,
                          const float *const *gs, const float *const *us, const float *const *ds,
                          const float *xg, const int *xoff, const int *nr,

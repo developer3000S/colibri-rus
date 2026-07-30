@@ -83,10 +83,22 @@ Format: `VAR` — default — effect.
 | Variable | Default | Effect |
 |---|---|---|
 | `COLI_MODEL_DIRS` | unset | SPLIT the model across 2+ drives: a `;`/`,`-separated list of extra directories, each holding a **distinct** subset of the `.safetensors` shards (no duplication). Shards act as a search path — every shard is read from whichever drive holds it, so concurrent expert loads parallelise across drives and combined capacity is used. Scales to N drives. Metadata (config/tokenizer/`.coli_usage`) stays in the primary `COLI_MODEL` dir. Pairs well with `PIPE=1` (concurrent loaders) + `DIRECT=1`. Distinct from — and composable with — `COLI_MODEL_MIRROR`: the mirror is matched per-shard by basename against the merged (split) index, so a mirror dir may hold a copy of any subset of the split's shards. |
-| `COLI_MODEL_MIRROR` | unset | Path to a second, byte-identical (read-only) copy of the model on another drive; expert reads are split across both. Partial mirrors work (only the shards present are used). |
-| `COLI_DISK_WEIGHTS` | unset (startup bandwidth probe) | Split ratio `<primary>,<mirror>` (e.g. `1,1` for 50/50, `9,3` for a fast+slow pair). Unset = probe both drives with the engine's own access pattern at startup. |
+| `COLI_MODEL_MIRROR` | unset | `;`/`,`-separated list of directories, each a byte-identical (read-only) copy of the model on another drive; expert reads split across the primary and every mirror. Partial mirrors work (only the shards present are used). |
+| `COLI_DISK_WEIGHTS` | unset (startup bandwidth probe) | Split ratio `<primary>,<mirror>[,<mirror2>...]` — one positive weight per drive (e.g. `1,1` for 50/50, `9,3` for a fast+slow pair, `1,1,1` for a 3-way mirror). Unset = probe every drive with the engine's own access pattern at startup. |
 
 Per-drive byte counts are reported in a `MIRROR:` stats line. Combine with `DIRECT=1` so the two copies never compete for page cache.
+
+## Vulkan (any GPU with a Vulkan 1.2 driver)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `COLI_VULKAN` | off | Enable the Vulkan backend. Requires a `make VK=1` build; fails at startup (no silent fallback) if libvulkan or the compiled shaders are missing. |
+| `COLI_VK_SHADERS` | auto | Path to the compiled `qmatmul.spv` **or** the directory holding the `.spv` set; the other shaders are found next to it. Unset: `shaders/` next to the binary, then CWD-relative `shaders/qmatmul.spv`. |
+| `COLI_VK_EXPERTS` | `320` | Pinned VRAM expert tier size: top-N experts by `.coli_usage` heat uploaded once at startup and served from VRAM with no RAM slot or disk read. `0` disables the tier (experts stay on the CPU path). ~19 MB VRAM per int4 expert. |
+| `COLI_VK_DENSE` | `0` | Run the resident dense matmuls (attention projections, shared expert) on the GPU. |
+| `COLI_VK_ATTN` | `0` | Run the S≤4 MLA absorb attention core (+ fused o-projection) on the GPU, with a persistent device-side KV mirror. |
+
+See [docs/vulkan.md](vulkan.md). On multi-core boxes also set `COLI_NO_OMP_TUNE=1` (see that doc for why).
 
 ## CUDA (NVIDIA)
 

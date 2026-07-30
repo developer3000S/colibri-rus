@@ -9,17 +9,22 @@
 
 // ---- shader: general quantized GEMV, one threadgroup per output element (o,si) ----
 // y[si,o] = (sum_i dequant(W[o,i]) * x[si,i]) * scale[o]. fmt: 0=f32 1=i8 2=i4 3=i2.
+// fmt=4 (grouped int4, dev e9b3614 matmul_i4_grouped, #298/#451 CUDA twin): same packed
+// nibble layout as fmt=2, but scale is PER-GROUP (gsz elements of I), buffer(1) holds
+// [O, ceil(I/gsz)] floats indexed scale[o*ng+g] -- so unlike fmt 1-3, the group scale is
+// folded into the accumulation itself (see the fmt==4 branch), not applied once at the end.
 static const char *SHADER = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
 kernel void mm_gemv(device const uchar* w      [[buffer(0)]],   // raw weight bytes
-                    device const float* scale  [[buffer(1)]],   // [O]
+                    device const float* scale  [[buffer(1)]],   // [O] (fmt<4) or [O,ceil(I/gsz)] (fmt==4)
                     device const float* x      [[buffer(2)]],   // [S,I]
                     device float*       y      [[buffer(3)]],   // [S,O]
                     constant int& S [[buffer(4)]], constant int& I [[buffer(5)]],
                     constant int& O [[buffer(6)]], constant int& fmt [[buffer(7)]],
                     constant int& NT [[buffer(8)]],
+                    constant int& gsz [[buffer(9)]],             // fmt==4 group size (ignored otherwise)
                     uint tg [[threadgroup_position_in_grid]],
                     uint slane [[thread_index_in_simdgroup]],
                     uint sgid [[simdgroup_index_in_threadgroup]]) {
@@ -53,6 +58,23 @@ kernel void mm_gemv(device const uchar* w      [[buffer(0)]],   // raw weight by
     for (int i = slane; i < I; i += 32) {
       uchar b = wr[i>>2]; int v = (b >> (2*(i&3))) & 0x3; acc += float(v-2) * xr[i];
     }
+  } else if (fmt == 4) {                            // int4 GROUPED: same nibble packing as fmt=2,
+                                                     // one f32 scale per gsz-element group along I.
+                                                     // Each lane owns one packed byte (2 elements) per
+                                                     // 64-lane stride -> memory access stays coalesced,
+                                                     // and a group never splits a byte (gsz is even).
+    int rb = (I+1)/2; int ng = (I+gsz-1)/gsz;
+    device const uchar* wr = w + (long)o * rb;
+    device const float* scl = scale + (long)o * ng;
+    for (int i = slane*2; i < I; i += 64) {
+      uchar b = wr[i>>1];
+      int g0 = i / gsz; float sc0 = scl[g0];
+      acc += float(int(b&0xF)-8) * xr[i] * sc0;
+      if (i+1 < I) {
+        int g1 = (i+1) / gsz; float sc1 = (g1==g0) ? sc0 : scl[g1];
+        acc += float(int(b>>4)-8) * xr[i+1] * sc1;
+      }
+    }
   } else {                                          // f32
     device const float* wr = (device const float*)(w) + (long)o * I;
     device const float4* w4 = (device const float4*)wr;
@@ -60,7 +82,8 @@ kernel void mm_gemv(device const uchar* w      [[buffer(0)]],   // raw weight by
     for (int i = I8*8 + slane; i < I; i += 32) acc += wr[i] * xr[i];
   }
   acc = simd_sum(acc);
-  if (slane == 0) y[row] = acc * scale[o];
+  // fmt==4 already folded the per-group scale into acc above -- do not scale again.
+  if (slane == 0) y[row] = (fmt == 4) ? acc : acc * scale[o];
 }
 
 // Batched bindless expert GEMV: each row gr belongs to expert erow[gr], whose weight and
@@ -423,7 +446,13 @@ static size_t fmt_bytes(int fmt, int I, int O) {
   if (fmt == 1) return (size_t)O * I;
   if (fmt == 2) return (size_t)O * ((I+1)/2);
   if (fmt == 3) return (size_t)O * ((I+3)/4);
+  if (fmt == 4) return (size_t)O * ((I+1)/2);   // grouped int4: identical packed-nibble layout to fmt=2
   return (size_t)O * I * sizeof(float);
+}
+// Grouped-int4 (fmt=4) scale-array size: one f32 per gsz-element group, per row -> O*ceil(I/gsz).
+static size_t fmt_scale_bytes(int fmt, int I, int O, int gs) {
+  if (fmt == 4) return (size_t)O * ((I + gs - 1) / gs) * sizeof(float);
+  return (size_t)O * sizeof(float);
 }
 
 // Wrap host memory zero-copy if page-aligned, else copy into a shared buffer.
@@ -589,15 +618,15 @@ extern "C" int  coli_metal_mem_info(size_t *used, size_t *total) {
 
 extern "C" int coli_metal_matmul(ColiMetalTensor **tp, float *y, const float *x,
                                  const void *weights, const float *scales,
-                                 int fmt, int S, int I, int O) {
-  if (!g_dev || fmt < 0 || fmt > 3) return 0;
+                                 int fmt, int S, int I, int O, int gs) {
+  if (!g_dev || fmt < 0 || fmt > 4) return 0;
   @autoreleasepool {
     ColiMetalTensor *t = *tp;
     if (!t) {
       t = new ColiMetalTensor();
       t->fmt = fmt; t->I = I; t->O = O; t->wbytes = fmt_bytes(fmt, I, O);
       t->w = wrap(weights, t->wbytes);
-      t->s = wrap(scales, (size_t)O * sizeof(float));
+      t->s = wrap(scales, fmt_scale_bytes(fmt, I, O, gs));
       *tp = t;
       g_tensor_count++; g_tensor_bytes += t->wbytes;
     }
@@ -611,7 +640,7 @@ extern "C" int coli_metal_matmul(ColiMetalTensor **tp, float *y, const float *x,
     int NT=S*O;
     [e setBytes:&S length:4 atIndex:4]; [e setBytes:&I length:4 atIndex:5];
     [e setBytes:&O length:4 atIndex:6]; [e setBytes:&fmt length:4 atIndex:7];
-    [e setBytes:&NT length:4 atIndex:8];
+    [e setBytes:&NT length:4 atIndex:8]; [e setBytes:&gs length:4 atIndex:9];
     [e dispatchThreadgroups:MTLSizeMake(((size_t)NT+3)/4,1,1) threadsPerThreadgroup:MTLSizeMake(128,1,1)];
     [e endEncoding]; [cb commit]; [cb waitUntilCompleted];
     memcpy(y, [by contents], (size_t)S*O*sizeof(float));
@@ -634,7 +663,9 @@ static void attn_scratch_init(){
 }
 // y[S,O] = quantized-weight(w) applied to xin[S,I]. Weights are registered (page-aligned,
 // zero-copy) at model load; resolve to (buffer,offset). Returns false to fall back to CPU.
-static bool bind_gemv(id<MTLComputeCommandEncoder> e, const void* w, const float* s, int fmt, int I, int O,
+// gs: fmt=4 group size (ignored for fmt!=4; callers pass QT.gs, which is 0 for non-grouped
+// tensors -- harmless, since the shader only reads it when fmt==4).
+static bool bind_gemv(id<MTLComputeCommandEncoder> e, const void* w, const float* s, int fmt, int gs, int I, int O,
                       id<MTLBuffer> xin, id<MTLBuffer> yout, int S){
   uint64_t wa=0,sa=0; id<MTLBuffer> wb=resolve(w,&wa); id<MTLBuffer> sb=resolve(s,&sa);
   if(!wb||!sb) return false;
@@ -645,19 +676,22 @@ static bool bind_gemv(id<MTLComputeCommandEncoder> e, const void* w, const float
   [e setBuffer:xin offset:0 atIndex:2]; [e setBuffer:yout offset:0 atIndex:3];
   int NT=S*O;
   [e setBytes:&S length:4 atIndex:4]; [e setBytes:&I length:4 atIndex:5]; [e setBytes:&O length:4 atIndex:6]; [e setBytes:&fmt length:4 atIndex:7];
-  [e setBytes:&NT length:4 atIndex:8];
+  [e setBytes:&NT length:4 atIndex:8]; [e setBytes:&gs length:4 atIndex:9];
   [e dispatchThreadgroups:MTLSizeMake(((size_t)NT+3)/4,1,1) threadsPerThreadgroup:MTLSizeMake(128,1,1)];
   return true;
 }
 
 // Weight-pointer bundle for one layer's attention (+optional layer tail). All pointers
-// must be inside registered allocations.
+// must be inside registered allocations. *_gs: fmt=4 group size for the corresponding
+// weight (0 if that weight isn't grouped). kv_b has none: it never flows through bind_gemv
+// -- a_qabs/a_ctx dequantize it inline with a PER-ROW-only helper (a_deqrow), so a fmt=4
+// kv_b is out of scope for this stage (see PR_BODY.md UNCERTAINTIES).
 typedef struct {
-  const void *qa_w; const float *qa_s; int qa_fmt; const float *qa_ln;
-  const void *qb_w; const float *qb_s; int qb_fmt;
-  const void *kva_w; const float *kva_s; int kva_fmt; const float *kva_ln;
+  const void *qa_w; const float *qa_s; int qa_fmt; int qa_gs; const float *qa_ln;
+  const void *qb_w; const float *qb_s; int qb_fmt; int qb_gs;
+  const void *kva_w; const float *kva_s; int kva_fmt; int kva_gs; const float *kva_ln;
   const void *kvb_w; const float *kvb_s; int kvb_fmt;
-  const void *o_w;  const float *o_s;  int o_fmt;
+  const void *o_w;  const float *o_s;  int o_fmt; int o_gs;
 } AttnW;
 
 // Encode the fused attention chain into encoder e. Input: ax_ holds the NORMED x [S,AH].
@@ -680,10 +714,10 @@ static bool encode_attention(id<MTLComputeCommandEncoder> e, const AttnW *W,
       [e setBuffer:acomp_ offset:0 atIndex:0]; [e setBytes:&off length:4 atIndex:1]; [e setBytes:&ss length:4 atIndex:2];
       [e setBuffer:dst offset:doff atIndex:3]; [e setBytes:&n length:4 atIndex:4]; [e setBytes:&n length:4 atIndex:5];
       [e dispatchThreads:MTLSizeMake((size_t)S*n,1,1) threadsPerThreadgroup:MTLSizeMake(64,1,1)]; };
-    bind_gemv(e,W->qa_w,W->qa_s,W->qa_fmt,AH,AQLORA,ax_,aqr_,S);
-    bind_gemv(e,W->kva_w,W->kva_s,W->kva_fmt,AH,AKVL+AROPE,ax_,acomp_,S); BAR();
+    bind_gemv(e,W->qa_w,W->qa_s,W->qa_fmt,W->qa_gs,AH,AQLORA,ax_,aqr_,S);
+    bind_gemv(e,W->kva_w,W->kva_s,W->kva_fmt,W->kva_gs,AH,AKVL+AROPE,ax_,acomp_,S); BAR();
     rms(aqr_,0,aqaln_,AQLORA,S); cpy(0,Lb,Loff,AKVL); cpy(AKVL,Rb,Roff,AROPE); BAR();
-    bind_gemv(e,W->qb_w,W->qb_s,W->qb_fmt,AQLORA,AHQH,aqr_,aqf_,S); rms(Lb,Loff,akvaln_,AKVL,S); rope(Rb,Roff,0,AROPE,0,1); BAR();
+    bind_gemv(e,W->qb_w,W->qb_s,W->qb_fmt,W->qb_gs,AQLORA,AHQH,aqr_,aqf_,S); rms(Lb,Loff,akvaln_,AKVL,S); rope(Rb,Roff,0,AROPE,0,1); BAR();
     rope(aqf_,0,ANOPE,AHQH,AQH,AHEADS); BAR();
     [e setComputePipelineState:g_a_qabs]; [e setBuffer:kvbW offset:kvbwoff atIndex:0]; [e setBuffer:kvbS offset:kvbsoff atIndex:1]; [e setBuffer:aqf_ offset:0 atIndex:2]; [e setBuffer:aqabs_ offset:0 atIndex:3];
     [e dispatchThreads:MTLSizeMake((size_t)S*AHEADS*AKVL,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)]; BAR();
@@ -696,7 +730,7 @@ static bool encode_attention(id<MTLComputeCommandEncoder> e, const AttnW *W,
     [e dispatchThreads:MTLSizeMake((size_t)S*AHEADS*AKVL,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)]; BAR();
     [e setComputePipelineState:g_a_ctx]; [e setBuffer:kvbW offset:kvbwoff atIndex:0]; [e setBuffer:kvbS offset:kvbsoff atIndex:1]; [e setBuffer:aclat_ offset:0 atIndex:2]; [e setBuffer:actx_ offset:0 atIndex:3];
     [e dispatchThreads:MTLSizeMake((size_t)S*AHEADS*AVH,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)]; BAR();
-    bind_gemv(e,W->o_w,W->o_s,W->o_fmt,AHVH,AH,actx_,aout_,S);
+    bind_gemv(e,W->o_w,W->o_s,W->o_fmt,W->o_gs,AHVH,AH,actx_,aout_,S);
     return true;
 }
 // Resolve Lc/Rc + kv_b (+pre-check the projection weights). Returns false -> CPU fallback.
@@ -714,18 +748,18 @@ static bool resolve_attn(const AttnW *W, float *Lc, float *Rc,
 }
 
 extern "C" int coli_metal_attn_decode(const float* x,
-    const void* qa_w,const float* qa_s,int qa_fmt,const float* qa_ln,
-    const void* qb_w,const float* qb_s,int qb_fmt,
-    const void* kva_w,const float* kva_s,int kva_fmt,const float* kva_ln,
+    const void* qa_w,const float* qa_s,int qa_fmt,int qa_gs,const float* qa_ln,
+    const void* qb_w,const float* qb_s,int qb_fmt,int qb_gs,
+    const void* kva_w,const float* kva_s,int kva_fmt,int kva_gs,const float* kva_ln,
     const void* kvb_w,const float* kvb_s,int kvb_fmt,
-    const void* o_w,const float* o_s,int o_fmt,
+    const void* o_w,const float* o_s,int o_fmt,int o_gs,
     float* Lc,float* Rc,int S,int pos_base,int st0,float eps,float theta,float ascale,float* out){
   if(!g_dev) return 0;
   if(st0!=0 || S<1 || S>AMAXS) return 0;     // partial-KV / S>4 -> CPU
   int T=pos_base+S;
   @autoreleasepool {
     attn_scratch_init();
-    AttnW W={qa_w,qa_s,qa_fmt,qa_ln,qb_w,qb_s,qb_fmt,kva_w,kva_s,kva_fmt,kva_ln,kvb_w,kvb_s,kvb_fmt,o_w,o_s,o_fmt};
+    AttnW W={qa_w,qa_s,qa_fmt,qa_gs,qa_ln,qb_w,qb_s,qb_fmt,qb_gs,kva_w,kva_s,kva_fmt,kva_gs,kva_ln,kvb_w,kvb_s,kvb_fmt,o_w,o_s,o_fmt,o_gs};
     id<MTLBuffer> Lb,Rb,kvbW,kvbS; size_t loff,roff,kvbwoff,kvbsoff;
     if(!resolve_attn(&W,Lc,Rc,&Lb,&loff,&Rb,&roff,&kvbW,&kvbwoff,&kvbS,&kvbsoff)) return 0;
     ascore_=ensure(ascore_,&ascore_cap,(size_t)S*AHEADS*T*4);
@@ -752,14 +786,14 @@ extern "C" int coli_metal_attn_decode(const float* x,
 // idx/w/keff (routing). Returns 0 -> CPU fallback (whole layer falls back).
 extern "C" int coli_metal_layer_decode(float *x,
     const float *in_ln, const float *post_ln,
-    const void* qa_w,const float* qa_s,int qa_fmt,const float* qa_ln,
-    const void* qb_w,const float* qb_s,int qb_fmt,
-    const void* kva_w,const float* kva_s,int kva_fmt,const float* kva_ln,
+    const void* qa_w,const float* qa_s,int qa_fmt,int qa_gs,const float* qa_ln,
+    const void* qb_w,const float* qb_s,int qb_fmt,int qb_gs,
+    const void* kva_w,const float* kva_s,int kva_fmt,int kva_gs,const float* kva_ln,
     const void* kvb_w,const float* kvb_s,int kvb_fmt,
-    const void* o_w,const float* o_s,int o_fmt,
-    const void* shg_w,const float* shg_s,int shg_fmt,
-    const void* shu_w,const float* shu_s,int shu_fmt,
-    const void* shd_w,const float* shd_s,int shd_fmt,
+    const void* o_w,const float* o_s,int o_fmt,int o_gs,
+    const void* shg_w,const float* shg_s,int shg_fmt,int shg_gs,
+    const void* shu_w,const float* shu_s,int shu_fmt,int shu_gs,
+    const void* shd_w,const float* shd_s,int shd_fmt,int shd_gs,
     const float *router_w, const float *router_bias,
     int E, int K, int Ksel, float topp, int normk, float rscale,
     float *Lc, float *Rc, int S, int pos_base, int st0,
@@ -770,7 +804,7 @@ extern "C" int coli_metal_layer_decode(float *x,
   int T=pos_base+S; const int SI=2048;
   @autoreleasepool {
     attn_scratch_init();
-    AttnW W={qa_w,qa_s,qa_fmt,qa_ln,qb_w,qb_s,qb_fmt,kva_w,kva_s,kva_fmt,kva_ln,kvb_w,kvb_s,kvb_fmt,o_w,o_s,o_fmt};
+    AttnW W={qa_w,qa_s,qa_fmt,qa_gs,qa_ln,qb_w,qb_s,qb_fmt,qb_gs,kva_w,kva_s,kva_fmt,kva_gs,kva_ln,kvb_w,kvb_s,kvb_fmt,o_w,o_s,o_fmt,o_gs};
     id<MTLBuffer> Lb,Rb,kvbW,kvbS; size_t loff,roff,kvbwoff,kvbsoff;
     if(!resolve_attn(&W,Lc,Rc,&Lb,&loff,&Rb,&roff,&kvbW,&kvbwoff,&kvbS,&kvbsoff)) return 0;
     uint64_t ina=0,pna=0,rwa=0,rba=0,d;
@@ -807,8 +841,8 @@ extern "C" int coli_metal_layer_decode(float *x,
     [e dispatchThreads:MTLSizeMake((size_t)S*AH,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)]; BAR();
     copyrow(axr_,anrm_,AH); BAR(); rmsw(anrm_,pnB,pnoff,AH,S); BAR();
     // 4) shared expert gate/up + router (all read anrm_, independent)
-    bind_gemv(e,shg_w,shg_s,shg_fmt,AH,SI,anrm_,ash1_,S);
-    bind_gemv(e,shu_w,shu_s,shu_fmt,AH,SI,anrm_,ash2_,S);
+    bind_gemv(e,shg_w,shg_s,shg_fmt,shg_gs,AH,SI,anrm_,ash1_,S);
+    bind_gemv(e,shu_w,shu_s,shu_fmt,shu_gs,AH,SI,anrm_,ash2_,S);
     { int NT=S*E, D=AH; [e setComputePipelineState:g_r_router];
       [e setBuffer:rwB offset:rwoff atIndex:0]; [e setBuffer:anrm_ offset:0 atIndex:1]; [e setBuffer:asig_ offset:0 atIndex:2];
       [e setBytes:&E length:4 atIndex:3]; [e setBytes:&D length:4 atIndex:4]; [e setBytes:&NT length:4 atIndex:5];
@@ -835,7 +869,7 @@ extern "C" int coli_metal_layer_decode(float *x,
       else        [e dispatchThreads:MTLSizeMake(S,1,1) threadsPerThreadgroup:MTLSizeMake(S,1,1)]; }
     BAR();
     // 6) shared down
-    bind_gemv(e,shd_w,shd_s,shd_fmt,SI,AH,ash1_,ashout_,S);
+    bind_gemv(e,shd_w,shd_s,shd_fmt,shd_gs,SI,AH,ash1_,ashout_,S);
     double tc=mnow();
     [e endEncoding]; [cb commit]; [cb waitUntilCompleted];
     if(cb.status==MTLCommandBufferStatusError){ fprintf(stderr,"[metal] layer cmdbuf error: %s\n", cb.error?[[cb.error localizedDescription]UTF8String]:"?"); return 0; }
@@ -856,8 +890,8 @@ extern "C" int coli_metal_layer_decode(float *x,
 // registered (zero-copy); x/y go through grow-only shared scratch. Returns 0 -> CPU fallback.
 static id<MTLBuffer> g_gx, g_gy; static size_t g_gx_cap, g_gy_cap;
 extern "C" int coli_metal_gemm(float *y, const float *x, const void *wp, const float *sp,
-                               int fmt, int S, int I, int O) {
-  if (!g_dev || (fmt!=1 && fmt!=2)) return 0;
+                               int fmt, int S, int I, int O, int gs) {
+  if (!g_dev || (fmt!=1 && fmt!=2 && fmt!=4)) return 0;
   @autoreleasepool {
     uint64_t wa=0,sa=0; id<MTLBuffer> wb=resolve(wp,&wa), sb=resolve(sp,&sa);
     if(!wb||!sb) return 0;
@@ -870,6 +904,7 @@ extern "C" int coli_metal_gemm(float *y, const float *x, const void *wp, const f
     [e setBuffer:wb offset:woff atIndex:0]; [e setBuffer:sb offset:soff atIndex:1];
     [e setBytes:&I length:4 atIndex:5];
     [e setBytes:&O length:4 atIndex:6]; [e setBytes:&fmt length:4 atIndex:7];
+    [e setBytes:&gs length:4 atIndex:9];   /* loop-invariant, like I/O/fmt: group size for fmt=4 (0 = per-row) */
     // Grid-size cap. One dispatch of NT=S*O output elements launches (NT+3)/4 threadgroups; past
     // a device grid limit (observed on M-series: kv_b grid ~3.1e7 tg clean at S=4376, ~5.4e7 tg
     // CORRUPT at S=7478) rows beyond the limit are silently never computed and the output keeps

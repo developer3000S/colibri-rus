@@ -154,6 +154,9 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_MLA_BITS` | 8 | load-time bits for MLA projections |
 | `K3_HEAD_BITS` | 8 | load-time bits for lm_head |
 | `K3_EXPERT_GB` | 8 | routed-expert LRU budget |
+| `K3_VK` | 1 | Vulkan tier when built with `make VK=1 kimi_k3` (0 = pure CPU) |
+| `K3_VK_GB` | driver budget | VRAM cap for the Vulkan tier |
+| `K3_VK_UP` | 8 | routed-expert uploads per step (fill-once tier) |
 | `K3_DIRECT` | 1 | O_DIRECT expert reads (0 = buffered + WILLNEED) |
 | `K3_IDOT` | 1 | int8-activation expert matmuls (0 = exact-float kernel) |
 | `K3_PIPE` | 1 | overlap expert loads with compute (loader threads) |
@@ -220,12 +223,37 @@ is returned as `reasoning_content`, response text as `content`, and
 `<|end_of_msg|>` remains the model-owned stop token. `STOP` and `CANCEL` are
 honoured between generated tokens.
 
+## Vulkan tier (`make VK=1 kimi_k3`)
+
+The shared Vulkan backend (`backend_vulkan.c`) gained an **fmt=7 MXFP4**
+decode path for K3's expert format — e2m1 nibbles with the ue8m0 exponents
+expanded to f32 per-32-group scales at upload, so the QAT bytes are uploaded
+exactly as stored and never re-encoded (kernel vs `matmul_mxfp4`: rel_l2
+2.2e-07 on an RX 9070/RADV, 2.6e-07 on llvmpipe;
+`tests/test_vk_mxfp4.c`). The engine keeps two residency classes on the
+card, both with transparent CPU fallback and identical output:
+
+- **shared experts**, uploaded once at init (int4/int8, the existing
+  fmt-1/4 shaders): they run every token and are the largest always-on
+  dense slice that fits VRAM (7.5 GB for all 92 MoE layers at int4);
+- a **fill-once routed-expert tier** in fmt=7: experts enter from
+  freshly-read RAM slots (`K3_VK_UP` per step) until the VRAM budget
+  (`K3_VK_GB`) is reached. At decode, tier-resident experts skip **both**
+  the 17.5 MB disk read and the CPU matmuls (one paired w1/w3 submit,
+  SiTU-GLU on CPU, w2 down). Chunked prefill stays on the CPU-batched path
+  and still warms the tier.
+
+K3's Quantile-Balancing-flat routing caps what any cache tier can do — the
+tier's value scales with how long the server lives (fill-once) and with the
+measured short-term reuse (temporal locality), not with marginal expert
+heat. `K3_VK=0` disables the tier at runtime.
+
 ## Current limitations
 
 - Decode is single-token (no speculative decoding — K3 has no MTP head).
 - Tool declarations/calls and image content are not exposed through the shared
   gateway yet; unsupported requests fail explicitly.
-- CPU only (no CUDA/Metal/Vulkan tier).
+- CPU + optional Vulkan tier (no CUDA/Metal).
 - The protocol, tokenizer, gateway, TUI, and Web client paths are locally
   testable without the 1.5 TB checkpoint. A release claim still requires one
   full-model multi-turn TUI/Web run on a host that owns the complete snapshot.

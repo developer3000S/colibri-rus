@@ -40,9 +40,11 @@ typedef struct {
     int        dfds[512];  /* gemelli O_DIRECT (aperti pigramente): -2 = non ancora provato */
     char      *paths[512];
     int        nfd;
-    int        mfds[512];  /* MIRROR: fds of the second model copy (dual-SSD), -1 = absent */
-    int        mdfds[512]; /* O_DIRECT twins of the second copy, -1 = absent */
-    int        nmirror;    /* files accepted into the mirror (0 = mirror inactive) */
+#define ST_MAX_MIR 4       /* extra read replicas beyond the primary (multi-SSD) */
+    int        mfds[ST_MAX_MIR][512];  /* MIRROR: fds of replica copy r+1 (multi-SSD), -1 = absent */
+    int        mdfds[ST_MAX_MIR][512]; /* O_DIRECT twins of the replica copies, -1 = absent */
+    int        nmirror[ST_MAX_MIR];    /* files accepted into replica r+1 */
+    int        nrep;       /* registered replica copies (0 = mirror inactive) */
     int       *hidx;      /* hash map nome->indice (open addressing): con ~120k tensori
                            * (GLM: 256 expert x 78 layer x 3 x 2) la scansione lineare
                            * costava decine di secondi/token (misurato sul primo run reale) */
@@ -110,34 +112,41 @@ static int st_direct_fd(shards *S, int fd) {
     int i = st_fidx(S, fd); return i < 0 ? -1 : S->dfds[i];
 }
 
-/* ---- MIRROR (dual-SSD): second read-only copy of the model on another drive ----
- * st_fd_rep/st_direct_fd_rep: fd of replica `rep` (0 = primary, 1 = mirror) for
- * the SAME file identified by its primary fd. -1 if that replica is absent. */
+/* ---- MIRROR (multi-SSD): read-only copies of the model on other drives ----
+ * st_fd_rep/st_direct_fd_rep: fd of replica `rep` (0 = primary, 1..nrep =
+ * mirrors) for the SAME file identified by its primary fd. -1 if absent. */
 static int st_fd_rep(shards *S, int fd, int rep) {
     if (!rep) return fd;
-    if (!S->nmirror) return -1;
-    int i = st_fidx(S, fd); return i < 0 ? -1 : S->mfds[i];
+    if (rep > S->nrep) return -1;
+    int i = st_fidx(S, fd); return i < 0 ? -1 : S->mfds[rep-1][i];
 }
 static int st_direct_fd_rep(shards *S, int fd, int rep) {
     if (!rep) return st_direct_fd(S, fd);
-    if (!S->nmirror) return -1;
-    int i = st_fidx(S, fd); return i < 0 ? -1 : S->mdfds[i];
+    if (rep > S->nrep) return -1;
+    int i = st_fidx(S, fd); return i < 0 ? -1 : S->mdfds[rep-1][i];
 }
 
-/* Registers <dir>/<basename> as a read replica of every already-indexed shard.
- * A file is accepted ONLY if its size and safetensors header are byte-identical
- * to the primary: the data_offsets then match by construction, so every pread
- * is valid on either copy. Missing or divergent files simply stay on the
- * primary (the mirror may be partial, e.g. a smaller SSD holding only the
- * expert shards). Returns the number of accepted files. The mirror is NEVER
- * written to: .coli_usage/.coli_kv keep deriving from the primary alone. */
-static int st_mirror_init(shards *S, const char *dir) {
-    if (S->nmirror) for (int i = 0; i < S->nfd; i++) {   /* re-init: drop the old replica */
-        if (S->mfds[i] >= 0) close(S->mfds[i]);
-        if (S->mdfds[i] >= 0) close(S->mdfds[i]);
+/* Registers <dir>/<basename> as read replica S->nrep+1 of every already-indexed
+ * shard. A file is accepted ONLY if its size and safetensors header are
+ * byte-identical to the primary: the data_offsets then match by construction,
+ * so every pread is valid on any copy. Missing or divergent files simply stay
+ * on the primary (a mirror may be partial, e.g. a smaller SSD holding only the
+ * expert shards). Returns the number of accepted files; a dir contributing 0
+ * files claims no replica slot. Mirrors are NEVER written to: .coli_usage /
+ * .coli_kv keep deriving from the primary alone. */
+static void st_mirror_reset(shards *S) {           /* re-init: drop every replica */
+    for (int r = 0; r < S->nrep; r++) for (int i = 0; i < S->nfd; i++) {
+        if (S->mfds[r][i] >= 0) close(S->mfds[r][i]);
+        if (S->mdfds[r][i] >= 0) close(S->mdfds[r][i]);
     }
-    for (int i = 0; i < ST_MAX_SHARDS; i++) { S->mfds[i] = -1; S->mdfds[i] = -1; }
-    S->nmirror = 0;
+    memset(S->nmirror, 0, sizeof(S->nmirror));
+    S->nrep = 0;
+}
+static int st_mirror_add(shards *S, const char *dir) {
+    if (S->nrep >= ST_MAX_MIR) return 0;
+    int r = S->nrep;
+    for (int i = 0; i < ST_MAX_SHARDS; i++) { S->mfds[r][i] = -1; S->mdfds[r][i] = -1; }
+    S->nmirror[r] = 0;
     for (int i = 0; i < S->nfd; i++) {
         const char *base = strrchr(S->paths[i], '/');
 #ifdef _WIN32
@@ -166,15 +175,21 @@ static int st_mirror_init(shards *S, const char *dir) {
             fprintf(stderr, "[MIRROR] %s: header differs from the primary copy — file skipped\n", mp);
             close(mfd); continue;
         }
-        S->mfds[i] = mfd;
+        S->mfds[r][i] = mfd;
 #ifdef O_DIRECT
-        S->mdfds[i] = open(mp, COMPAT_O_RDONLY | O_DIRECT);
+        S->mdfds[r][i] = open(mp, COMPAT_O_RDONLY | O_DIRECT);
 #elif defined(__APPLE__) || defined(_WIN32)
-        S->mdfds[i] = compat_open_direct(mp);
+        S->mdfds[r][i] = compat_open_direct(mp);
 #endif
-        S->nmirror++;
+        S->nmirror[r]++;
     }
-    return S->nmirror;
+    if (S->nmirror[r] > 0) { S->nrep++; return S->nmirror[r]; }
+    return 0;
+}
+/* backward-compatible single-mirror entry point */
+static int st_mirror_init(shards *S, const char *dir) {
+    st_mirror_reset(S);
+    return st_mirror_add(S, dir);
 }
 
 /* indicizza tutti i model-*.safetensors in snap_dir */

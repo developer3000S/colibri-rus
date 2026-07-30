@@ -40,6 +40,13 @@
  *   K3_MLA_BITS=8|4|32   MLA projections (default 8)
  *   K3_HEAD_BITS=8|4|32  lm_head (default 8)
  *   K3_EXPERT_GB=N       routed-expert LRU cache budget (default 8)
+ *   K3_VK=0|1            Vulkan tier (build with `make VK=1 kimi_k3`; default
+ *                        1 when built): shared experts VRAM-resident + a
+ *                        fill-once native-MXFP4 routed-expert tier; resident
+ *                        experts skip disk AND CPU at decode. CPU fallback
+ *                        everywhere; output identical.
+ *   K3_VK_GB=N           VRAM cap for the tier (default: driver budget)
+ *   K3_VK_UP=N           routed-expert uploads per step (default 8)
  *   K3_DIRECT=0|1        O_DIRECT expert reads (default 1; buffered fallback)
  *   K3_IDOT=0|1          int8-activation expert matmuls (default 1; 0 = float)
  *   K3_PIPE=0|1          overlap expert loads with compute (default 1)
@@ -94,7 +101,8 @@ typedef struct {
 } Cfg;
 
 /* ---------- RAM-resident weight, quantized at load ---------- */
-typedef struct { int fmt; float *f; int8_t *q8; uint8_t *q4; float *s; int O, I, gs; } W;
+typedef struct { int fmt; float *f; int8_t *q8; uint8_t *q4; float *s; int O, I, gs;
+                 void *vk; /* ColiVkTensor* once uploaded (K3_VK); NULL = CPU only */ } W;
 
 typedef struct {                          /* KDA layer */
     W q, k, v, o, g;
@@ -174,7 +182,62 @@ static void rmsnorm_(float *out, const float *x, const float *w, int D, float ep
 }
 
 /* ---------- W: load-time quantization + matvec ---------- */
+/* ---------- Vulkan tier (K3_VK, build with `make VK=1 kimi_k3`) ----------
+ * Two residency classes on the card, both with transparent CPU fallback:
+ *  - dense W tensors uploaded once at init (shared experts first): computed
+ *    by the existing fmt=1/4 shaders whenever S==1 (w_matmul hook below);
+ *  - a fill-once routed-expert tier in fmt=7 (native MXFP4, never re-encoded):
+ *    experts enter from freshly-read RAM slots (K3_VK_UP per step) until the
+ *    VRAM budget (K3_VK_GB) is reached; resident experts then skip BOTH the
+ *    disk read and the CPU matmuls at decode (C==1). */
+static int g_k3_vk=0;                     /* backend live (K3_VK=0 disables) */
+#ifdef COLI_VULKAN
+#include "backend_vulkan.h"
+typedef struct { void *w1, *w2, *w3; } VkExp;   /* ColiVkTensor* triple */
+static VkExp *g_vkexp; static int64_t g_vkexp_n;
+static int g_vk_upcap=8, g_vk_up_left=0, g_vk_full=0;
+static long g_vk_hit=0, g_vk_res=0;
+static double g_vk_gb=0;                  /* K3_VK_GB cap (0 = driver budget) */
+static const char *k3_vk_spv(char *buf, size_t n){
+    const char *env=getenv("COLI_VK_SHADERS");
+    struct stat st;
+    if(env&&*env){
+        if(!stat(env,&st)&&S_ISDIR(st.st_mode)){ snprintf(buf,n,"%s/qmatmul.spv",env); return buf; }
+        return env;
+    }
+#ifdef __linux__
+    ssize_t k=readlink("/proc/self/exe",buf,n-1);
+    if(k>0){
+        buf[k]=0;
+        char *sl=strrchr(buf,'/');
+        if(sl&&(size_t)(sl+1-buf)+sizeof("shaders/qmatmul.spv")<=n){
+            strcpy(sl+1,"shaders/qmatmul.spv");
+            if(!stat(buf,&st)) return buf;
+        }
+    }
+#endif
+    return "shaders/qmatmul.spv";
+}
+static int vk_budget_full(void){
+    double used=0,budget=0;
+    if(!coli_vk_mem_budget(&used,&budget)) return 0;
+    double cap=budget-0.5; if(g_vk_gb>0&&g_vk_gb<cap) cap=g_vk_gb;
+    return used>=cap;
+}
+static int w_vk_upload(W *w){
+    if(w->vk) return 1;
+    int fmt = w->fmt==1?1 : w->fmt==4?4 : -1;
+    if(fmt<0) return 0;
+    return coli_vk_tensor_ensure((ColiVkTensor**)&w->vk,
+        fmt==1?(const void*)w->q8:(const void*)w->q4,w->s,fmt,w->I,w->O,w->gs);
+}
+#endif
 static void w_matmul(float *y, const float *x, const W *w, int S){
+#ifdef COLI_VULKAN
+    if(g_k3_vk&&S==1&&w->vk&&
+       coli_vk_matmul((ColiVkTensor**)&((W*)w)->vk,y,x,NULL,NULL,w->fmt,1,w->I,w->O,w->gs))
+        return;
+#endif
     if(w->fmt==0)      matmul(y,x,w->f,S,w->I,w->O);
     else if(w->fmt==1) matmul_q(y,x,w->q8,w->s,S,w->I,w->O);
     else if(w->fmt==4) matmul_i4_grouped(y,x,w->q4,w->s,S,w->I,w->O,w->gs);
@@ -519,6 +582,35 @@ static void model_init(Model *m, const char *snap, int n_layers_env){
           free(rn); free(rp); }
         w_load(m,&m->lm_head,"lm_head.weight",c->vocab,c->hidden,hbits);
     } else fprintf(stderr,"[K3] final norm/lm_head not present — trace-only mode\n");
+#ifdef COLI_VULKAN
+    { const char *ev=getenv("K3_VK");
+      if(!ev||atoi(ev)){
+        char sbuf[512]; const char *spv=k3_vk_spv(sbuf,sizeof(sbuf));
+        g_k3_vk=coli_vk_init(spv);
+        if(!g_k3_vk) fprintf(stderr,"[K3-VK] Vulkan unavailable (tried %s) — CPU only\n",spv);
+      }
+      if(g_k3_vk){
+        g_vk_gb=getenv("K3_VK_GB")?atof(getenv("K3_VK_GB")):0;
+        g_vk_upcap=getenv("K3_VK_UP")?atoi(getenv("K3_VK_UP")):8;
+        g_vkexp_n=(int64_t)c->n_layers*c->n_experts;
+        g_vkexp=calloc((size_t)g_vkexp_n,sizeof(VkExp));
+        if(!g_vkexp) g_k3_vk=0;
+      }
+      if(g_k3_vk){
+        /* dense residency: shared experts first — they run every token and are
+         * the biggest always-on RAM-bandwidth slice that fits VRAM */
+        int nsh=0;
+        for(int i=0;i<c->n_layers&&!vk_budget_full();i++){
+            if(!m->L[i].sparse) continue;
+            Moe *sm2=&m->L[i].moe;
+            nsh+=w_vk_upload(&sm2->sh_gate)+w_vk_upload(&sm2->sh_up)+w_vk_upload(&sm2->sh_down);
+        }
+        double used=0,budget=0; coli_vk_mem_budget(&used,&budget);
+        fprintf(stderr,"[K3-VK] resident: %d shared-expert mats (%.1f/%.1f GB); routed MXFP4 tier fills at decode (K3_VK_UP=%d/step, cap %s)\n",
+                nsh,used,budget,g_vk_upcap,g_vk_gb>0?"K3_VK_GB":"driver budget");
+      }
+    }
+#endif
     expert_table_init(m);
     /* expert LRU cache, per-layer slots from the global budget */
     double egb = getenv("K3_EXPERT_GB")?atof(getenv("K3_EXPERT_GB")):8.0;
@@ -530,7 +622,8 @@ static void model_init(Model *m, const char *snap, int n_layers_env){
      * regardless of K3_EXPERT_GB. */
     if(cap<1) cap=1;
     if(cap>c->n_experts) cap=c->n_experts;
-    m->ecache=calloc(c->n_layers,sizeof(LCache));
+    { int ncl=c->n_layers>0?c->n_layers:1;
+      m->ecache=calloc((size_t)ncl,sizeof(LCache)); }
     for(int i=0;i<c->n_layers;i++) if(m->L[i].sparse){
         m->ecache[i].cap=cap; m->ecache[i].s=calloc(cap,sizeof(Slot));
         for(int j2=0;j2<cap;j2++) m->ecache[i].s[j2].eid=-1;
@@ -775,6 +868,59 @@ static void expert_apply(Model *m, Slot *s, const float *z, float wk,
     for(int i=0;i<c->latent;i++) u[i]+=wk*hz[i];
 }
 
+#ifdef COLI_VULKAN
+/* GPU apply for a tier-resident expert (decode, S==1): w1/w3 in one paired
+ * submit, SiTU-GLU on CPU, w2 down. Returns 0 untouched on any failure so
+ * the caller can run the normal disk+CPU path. */
+static int vk_expert_apply(Model *m, int li, int eid, const float *z, float wk,
+                           float *u, float *gate, float *up, float *hz){
+    Cfg *c=&m->c;
+    VkExp *v=&g_vkexp[(int64_t)li*c->n_experts+eid];
+    if(!v->w1||!v->w2||!v->w3) return 0;
+    if(!coli_vk_matmul_pair((ColiVkTensor**)&v->w1,gate,NULL,NULL,c->moe_inter,
+                            (ColiVkTensor**)&v->w3,up,NULL,NULL,c->moe_inter,
+                            7,z,1,c->latent,32)) return 0;
+    for(int i=0;i<c->moe_inter;i++) gate[i]=situf_(gate[i],up[i],c->situ_b1,c->situ_b2);
+    if(!coli_vk_matmul((ColiVkTensor**)&v->w2,hz,gate,NULL,NULL,7,1,c->moe_inter,c->latent,32))
+        return 0;
+    for(int i=0;i<c->latent;i++) u[i]+=wk*hz[i];
+    g_vk_hit++;
+    return 1;
+}
+/* Fill the tier from a freshly-read RAM slot (main thread only). The ue8m0
+ * exponents expand to f32 group scales at upload (the shader is float-only). */
+static void vk_expert_try_upload(Model *m, int li, int eid, Slot *s){
+    if(!g_k3_vk||g_vk_full||g_vk_up_left<=0) return;
+    VkExp *v=&g_vkexp[(int64_t)li*m->c.n_experts+eid];
+    if(v->w1) return;
+    if(vk_budget_full()){ g_vk_full=1;
+        fprintf(stderr,"[K3-VK] expert tier full: %ld experts resident\n",g_vk_res);
+        return; }
+    uint8_t *w1p=s->buf, *w1s=w1p+m->e_w1p, *w2p=w1s+m->e_w1s, *w2s=w2p+m->e_w2p,
+            *w3p=w2s+m->e_w2s, *w3s=w3p+m->e_w1p;
+    int LT=m->c.latent, MI=m->c.moe_inter;
+    int64_t n1=m->e_w1s, n2=m->e_w2s;          /* scale counts = scale bytes (u8) */
+    float *sc=falloc(n1>n2?n1:n2);
+    int ok=1;
+    for(int64_t i=0;i<n1;i++) sc[i]=mx4_scale(w1s[i]);
+    ok=ok&&coli_vk_tensor_ensure((ColiVkTensor**)&v->w1,w1p,sc,7,LT,MI,32);
+    if(ok){ for(int64_t i=0;i<n2;i++) sc[i]=mx4_scale(w2s[i]);
+        ok=ok&&coli_vk_tensor_ensure((ColiVkTensor**)&v->w2,w2p,sc,7,MI,LT,32); }
+    if(ok){ for(int64_t i=0;i<n1;i++) sc[i]=mx4_scale(w3s[i]);
+        ok=ok&&coli_vk_tensor_ensure((ColiVkTensor**)&v->w3,w3p,sc,7,LT,MI,32); }
+    free(sc);
+    if(!ok){
+        if(v->w1){ coli_vk_tensor_free(v->w1); v->w1=NULL; }
+        if(v->w2){ coli_vk_tensor_free(v->w2); v->w2=NULL; }
+        if(v->w3){ coli_vk_tensor_free(v->w3); v->w3=NULL; }
+        g_vk_full=1;
+        fprintf(stderr,"[K3-VK] expert tier full: %ld experts resident\n",g_vk_res);
+        return;
+    }
+    g_vk_res++; g_vk_up_left--;
+}
+#endif
+
 /* ---------- async loader pool (K3_PIPE): expert preads overlap compute ----
  * A batch of jobs is submitted per token+layer; the compute loop below waits
  * per-expert on its ready flag, so expert j's math runs while j+1.. load.
@@ -869,6 +1015,9 @@ static void experts_apply_union(Model *m, int li, int nu, const int *uids,
                     usleep(50);
                 m->t_eload+=now_s()-t0;
             }
+#ifdef COLI_VULKAN
+            if(g_k3_vk&&qof[j]>=0) vk_expert_try_upload(m,li,uids[base+j],use[j]);
+#endif
             int f=pfirst[base+j];
             for(int p2=0;p2<pcnt[base+j];p2++){
                 int t=poslist[f+p2];
@@ -976,6 +1125,24 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
                 if(er->contig){ if(er->fd[0]>=0) posix_fadvise(er->fd[0],er->off[0],m->e_slot,POSIX_FADV_WILLNEED); }
                 else for(int k2=0;k2<6;k2++) if(er->fd[k2]>=0) posix_fadvise(er->fd[k2],er->off[k2],sizes[k2],POSIX_FADV_WILLNEED);
             }
+#ifdef COLI_VULKAN
+        /* decode: tier-resident experts run on the GPU and drop out of the
+         * disk union — that skip is the I/O saving. C>1 prefill stays on the
+         * CPU-batched path (and still feeds the tier via the upload hook). */
+        if(g_k3_vk&&C==1){
+            int keep=0;
+            for(int j=0;j<nu;j++){
+                int handled=0;
+                if(pcnt[j]==1){
+                    int t=poslist[pfirst[j]];
+                    handled=vk_expert_apply(m,li,uid[j],z+(int64_t)t*LT,
+                                            wlist[pfirst[j]],u+(int64_t)t*LT,gate,up,hz);
+                }
+                if(!handled){ uid[keep]=uid[j]; pcnt[keep]=pcnt[j]; pfirst[keep]=pfirst[j]; keep++; }
+            }
+            nu=keep;
+        }
+#endif
         experts_apply_union(m,li,nu,uid,pfirst,pcnt,poslist,wlist,z,LT,u,gate,up,hz);
         free(map);free(uid);free(pcnt);free(pfirst);free(poslist);free(wlist);free(cur);
     }
@@ -1012,6 +1179,9 @@ static float *g_x0=NULL; static int g_x0_n=0;  /* K3_X0: injected inputs (valida
 static FILE *g_lfp=NULL;                       /* K3_LOGITS: per-position logit dump */
 static float *step_chunk(Model *m, const int *ids, int pos0, int C){
     Cfg *c=&m->c; int D=c->hidden;
+#ifdef COLI_VULKAN
+    g_vk_up_left=g_vk_upcap;              /* routed-tier upload budget per step */
+#endif
     int nbmax=(c->n_layers+c->res_bs-1)/c->res_bs;
     float *hidden=falloc((int64_t)C*D), *bres=falloc((int64_t)C*nbmax*D);
     float *prefix=falloc((int64_t)C*D), *nrm=falloc((int64_t)C*D);
@@ -1372,6 +1542,10 @@ static void serve_one(Model *m, Tok *T, ServeReq *q){
     printf("PROF %.3f %d %d %.3f %.3f %.3f %.3f %.3f %d\n",
            dt,np,gen,disk,0.0,moe>disk?moe-disk:moe,m->t_attn-a0,m->t_head-h0,gen+1);
     fflush(stdout);
+#ifdef COLI_VULKAN
+    if(g_k3_vk) fprintf(stderr,"[K3-VK] routed tier: %ld resident, %ld GPU hits so far\n",
+                        g_vk_res,g_vk_hit);
+#endif
 }
 
 static void serve_loop(Model *m, Tok *T){

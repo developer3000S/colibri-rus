@@ -13,26 +13,31 @@
   English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.it.md">Italiano</a>
 </p>
 
-**Tiny engine, immense model.** Explore **GLM-5.2 (744B-parameter MoE)** across
-consumer and heterogeneous hardware — in pure C, with zero engine dependencies,
-by treating storage, RAM, and VRAM as one inference hierarchy.
+**Tiny engine, immense model.** Run **frontier MoE models — 744B to 2.8T
+parameters** — on consumer and heterogeneous hardware, in pure C with zero
+engine dependencies, by treating storage, RAM, and VRAM as one inference
+hierarchy.
 
-> **Colibrì is an experimental inference engine and research platform.** Its
-> primary goal is to pursue inference-side performance across the entire
-> software/hardware boundary — model formats, memory hierarchy, storage I/O,
-> placement, scheduling, kernels, speculation, and CPU/GPU overlap — so large
-> models depend less on scarce hardware and cost less to run.
+Four families run today: **GLM-5.2** (744B), **Inkling** (975B), **Kimi K3**
+(2.8T) and **OLMoE** (7B) — one C file each, the same `coli chat` /
+`coli serve` / `coli web` front end. [Full roster ↓](#other-supported-models)
 
-Colibrì treats VRAM, RAM, and storage as one managed memory hierarchy. It is
-deliberately a place to test aggressive systems ideas, not a production runtime
-with an SLA. Experiments must earn their place through reproducible end-to-end
-measurements, and the default policy **never silently changes model precision
-or router semantics**. Insufficient fast memory may reduce speed; it must not
-quietly redefine the model.
+> **Colibrì is an inference engine you can run today, and an open research
+> platform.** Its primary goal is to pursue inference-side performance across
+> the entire software/hardware boundary — model formats, memory hierarchy,
+> storage I/O, placement, scheduling, kernels, speculation, and CPU/GPU
+> overlap — so large models depend less on scarce hardware and cost less to run.
+
+Colibrì treats VRAM, RAM, and storage as one managed memory hierarchy, and it is
+deliberately a place to test aggressive systems ideas — so there is **no SLA on
+speed, and a hard guarantee on semantics**: experiments must earn their place
+through reproducible end-to-end measurements, and the default policy **never
+silently changes model precision or router semantics**. Insufficient fast memory
+may reduce speed; it must not quietly redefine the model.
 
 ```
 $ ./coli chat
-  🐦 colibri v1.1.0 — GLM-5.2 · 744B MoE · int4 · streaming CPU
+  🐦 colibri v1.3.0 — GLM-5.2 · 744B MoE · int4 · streaming CPU
   ✓ ready in 32s · resident 9.9 GB
   › ciao!
   ◆ Ciao! 😊 Come posso aiutarti oggi?
@@ -213,7 +218,11 @@ layer's experts — routing is measurably **71.6% predictable one layer ahead**.
 On GPUs, the resident pipeline (`COLI_CUDA_PIPE=2`) keeps the residual stream
 on-device across layers so the CPU expert loop runs uninterrupted; on Apple
 Silicon an experimental [Metal backend](docs/metal.md) does the batched expert
-math on the unified-memory GPU.
+math on the unified-memory GPU; and a [Vulkan backend](docs/vulkan.md) brings
+the expert tier, dense projections, and the MLA attention core to any GPU with
+a Vulkan 1.2 driver — including AMD cards via Mesa/RADV (the only backend for
+cards the vendor stacks no longer support, like the RX 580, and competitive
+with ROCm on RDNA4 — see [the benchmarking notes](docs/vulkan.md)).
 
 > **On real NVMe, measure `DIRECT=1`.** O_DIRECT bypasses the page cache and is
 > often a large win on drives with DRAM cache and bandwidth headroom (+34%
@@ -404,6 +413,7 @@ Two things that differ per model, both documented in the per-model page:
 | Tuning knobs, policies, the learning cache, prefetch | [docs/tuning.md](docs/tuning.md) |
 | Windows 11 native build (+ CUDA DLL) | [docs/windows.md](docs/windows.md) |
 | CUDA backend, VRAM expert tier, full residency | [docs/cuda.md](docs/cuda.md) |
+| Vulkan backend (any GPU: AMD via RADV, incl. cards ROCm dropped) | [docs/vulkan.md](docs/vulkan.md) |
 | Apple Silicon Metal backend | [docs/metal.md](docs/metal.md) |
 | OpenAI-compatible API, KV slots, web dashboard | [docs/api.md](docs/api.md) |
 | Grammar-forced drafts (structured output) | [docs/grammar-draft.md](docs/grammar-draft.md) |

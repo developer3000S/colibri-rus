@@ -80,6 +80,7 @@
 #include "st.h"
 #include "tok.h"
 #include "quant.h"
+#include "route_trace.h"                 /* shared routing telemetry (#700) */
 
 /* ---------- config ---------- */
 typedef struct {
@@ -1078,6 +1079,7 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
             }
         }
         keff[t]=Kt;
+        rt_route(li,t,idx,wsel,Kt);        /* traces and counts, one call */
     }
     float *z=falloc((int64_t)C*LT), *u=falloc((int64_t)C*LT);
     float *gate=falloc(MI), *up=falloc(MI), *hz=falloc(LT);
@@ -1597,6 +1599,15 @@ int main(int argc, char **argv){
     int nlayers=getenv("K3_LAYERS")?atoi(getenv("K3_LAYERS")):0;
     Model m;
     model_init(&m,snap,nlayers);
+    rt_init("kimi_k3",m.c.n_layers,m.c.n_experts);   /* counters, identity, ROUTE_TRACE */
+    /* A layer with no counter row is a layer that cannot be credited: dense layers do not
+     * route, and K3 has no MTP row. Without this a history record naming one of them is
+     * silently absorbed and written back out. See docs/routing-telemetry.md. */
+    for(int i=0;i<m.c.n_layers;i++) if(!m.L[i].sparse) rt_drop_row(i);
+    rt_drop_row(m.c.n_layers);
+    { const char *up=getenv("COLI_USAGE");           /* optional history to seed from */
+      if(up&&*up){ int64_t h=rt_load(up);
+        if(h>0) fprintf(stderr,"[USAGE] expert history: %lld selections (%s)\n",(long long)h,up); } }
     if(getenv("K3_TRACE")){
         m.trace=fopen(getenv("K3_TRACE"),"wb");
         if(!m.trace){ perror(getenv("K3_TRACE")); return 1; }
@@ -1715,5 +1726,7 @@ int main(int argc, char **argv){
     fprintf(stderr,"[K3] time: attn %.1fs moe %.1fs (eload %.1fs) head %.1fs | RSS %.1f GB\n",
             m.t_attn,m.t_moe,m.t_eload,m.t_head,rss_gb());
     if(m.trace) fclose(m.trace);
+    { const char *up=getenv("COLI_USAGE");
+      if(up&&*up) rt_save(up,0); }                   /* same bytes as every other engine */
     return 0;
 }

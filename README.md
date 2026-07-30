@@ -207,6 +207,26 @@ the hottest ones automatically — colibrì literally gets faster the more you u
 it. On multi-socket hosts, `COLI_NUMA=1` interleaves the resident weights across
 memory controllers ([#82](https://github.com/JustVugg/colibri/issues/82)).
 
+For a second drive that cannot hold the whole model, Colibri can rank a partial
+mirror from the expert history it already learns. Run a few representative
+prompts first so `.coli_usage` reflects the workload, then plan, stage, and
+verify the mirror:
+
+```bash
+./c/coli mirror plan  --model /fast/glm52_i4 --mirror /second/glm52_i4 \
+  --budget-gib 200 --reserve-gib 20
+./c/coli mirror stage --model /fast/glm52_i4 --mirror /second/glm52_i4 \
+  --budget-gib 200 --reserve-gib 20
+./c/coli mirror verify --model /fast/glm52_i4 --mirror /second/glm52_i4
+```
+
+The planner reads safetensors headers directly, follows split-model directories
+from `COLI_MODEL_DIRS`, and prioritizes shards that can serve the hottest routed
+experts. Staging never changes the primary model: it copies through temporary
+files, preserves the requested free-space reserve, verifies every shard with
+SHA-256, never deletes an existing mirror shard, and atomically publishes a
+receipt only after the selected mirror is ready.
+
 ### Never wait for the disk twice
 
 Misses are expensive, so the engine spends most of its cleverness avoiding and

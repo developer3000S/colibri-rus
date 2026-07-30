@@ -8,6 +8,7 @@ Run GLM-5.2 (744B) locally on CPU with roughly 15-26 GB of RAM.
   coli run "prompt"         one-shot generation
   coli info                 model, RAM, disk, and configuration status
   coli plan                 Disk / RAM / VRAM resource plan
+  coli mirror               Plan, stage, or verify a learned partial mirror
   coli doctor               installation and execution-plan diagnostics
   coli bench [task...]      quality benchmarks (MMLU/HellaSwag/...)
   coli convert              convert GLM-5.2-FP8 to int4, one shard at a time
@@ -1039,6 +1040,27 @@ def cmd_convert(a):
     print(f"  {C.dim}[2/2] int8 MTP head (speculative drafts){C.r}")
     sys.exit(subprocess.call(mtp_cmd+["--mtp"]))
 
+
+def cmd_mirror(a):
+    if not a.mirror:
+        sys.exit("mirror path required: pass --mirror or set COLI_MODEL_MIRROR")
+    command = [sys.executable, os.path.join(TOOLS, "mirror_plan.py"), a.action,
+               "--model", a.model, "--mirror", a.mirror]
+    source_dirs = list(a.source_dir)
+    configured = os.environ.get("COLI_MODEL_DIRS", "")
+    if configured:
+        source_dirs.extend(part.strip() for part in re.split(r"[;,]", configured)
+                           if part.strip())
+    for directory in source_dirs:
+        command += ["--source-dir", directory]
+    if a.usage:
+        command += ["--usage", a.usage]
+    if a.action != "verify":
+        command += ["--budget-gib", str(a.budget_gib),
+                    "--reserve-gib", str(a.reserve_gib)]
+    return subprocess.call(command)
+
+
 def main():
     common=argparse.ArgumentParser(add_help=False)
     common.add_argument("--model", default=DEF_MODEL); common.add_argument("--ram", type=int, default=0)  # 0 = auto (il motore usa l'88% della RAM disponibile)
@@ -1059,6 +1081,14 @@ def main():
     sub.add_parser("build", parents=[common]); sub.add_parser("info", parents=[common])
     pp=sub.add_parser("plan",parents=[common])
     pp.add_argument("--json",action="store_true")
+    pm=sub.add_parser("mirror", parents=[common],
+                      help="plan, stage, or verify a usage-ranked partial model mirror")
+    pm.add_argument("action", choices=("plan", "stage", "verify"))
+    pm.add_argument("--mirror", default=os.environ.get("COLI_MODEL_MIRROR"))
+    pm.add_argument("--source-dir", action="append", default=[])
+    pm.add_argument("--usage")
+    pm.add_argument("--budget-gib", type=float, default=0)
+    pm.add_argument("--reserve-gib", type=float, default=10)
     pd=sub.add_parser("doctor",parents=[common])
     pd.add_argument("--json",action="store_true",help="emit a versioned JSON report")
     pd.add_argument("--deep",action="store_true",
@@ -1112,7 +1142,8 @@ def main():
         help="int4 scale group size: 64 (default, group-scaled quality) or 0 (legacy per-row)")
     pc.add_argument("--no-mtp",action="store_true",help="skip the MTP head (no speculative drafts)")
     a=ap.parse_args()
-    handler={"build":cmd_build,"info":cmd_info,"plan":cmd_plan,"doctor":cmd_doctor,
+    handler={"build":cmd_build,"info":cmd_info,"plan":cmd_plan,"mirror":cmd_mirror,
+             "doctor":cmd_doctor,
              "run":cmd_run,"chat":cmd_chat,"serve":cmd_serve,"stop":cmd_stop,"bench":cmd_bench,
              "convert":cmd_convert,"web":cmd_web}.get(a.cmd)
     if handler: sys.exit(handler(a) or 0)

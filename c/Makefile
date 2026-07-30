@@ -437,10 +437,16 @@ olmoe$(EXE): olmoe.c st.h json.h compat.h sample.h tok.h tok_unicode.h tok_unico
 	$(CC) $(CFLAGS) olmoe.c -o olmoe$(EXE) $(LDFLAGS)
 
 # Qwen3.6-35B-A3B engine (hybrid Gated Attention + Gated DeltaNet + streaming
-# MoE). CPU-only in this target; the optional CUDA expert tier is a separate
-# follow-up (see docs/qwen36-phase01.md).
-qwen36$(EXE): qwen36.c st.h json.h compat.h
-	$(CC) $(CFLAGS) qwen36.c -o qwen36$(EXE) $(LDFLAGS)
+# MoE). With CUDA=1 the optional VRAM expert tier (qwen36_tier.c) is compiled
+# in and reuses the shared CUDA backend; without it the engine is CPU-only
+# (qwen36_tier.h provides inline stubs).
+ifeq ($(CUDA),1)
+QWEN36_TIER_SRC = qwen36_tier.c
+else
+QWEN36_TIER_SRC =
+endif
+qwen36$(EXE): qwen36.c qwen36_tier.h st.h json.h compat.h $(QWEN36_TIER_SRC) $(CUDA_OBJ)
+	$(CC) $(CFLAGS) qwen36.c $(QWEN36_TIER_SRC) $(CUDA_OBJ) -o qwen36$(EXE) $(LDFLAGS)
 
 inkling$(EXE): inkling.c st.h json.h compat.h $(INK_CUDA_OBJ)
 	$(CC) $(CFLAGS) inkling.c $(INK_CUDA_OBJ) -o inkling$(EXE) $(LDFLAGS)

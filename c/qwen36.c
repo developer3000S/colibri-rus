@@ -35,6 +35,7 @@
 #endif
 #include "st.h"
 #include "json.h"   /* tokenizer.json parsing (reuse minimal parser) */
+#include "qwen36_tier.h"   /* optional transparent Vulkan compute backend for MoE experts */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -624,6 +625,7 @@ static double g_tm_dec[6], g_tm_pre[6];   /* 0=deltanet 1=attention 2=moe_total 
 static long g_tm_dec_tokens = 0, g_tm_pre_tokens = 0;
 static double tm_now(void){ struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); return ts.tv_sec*1e3 + ts.tv_nsec/1e6; }
 static int tm_on(void){ if(g_timers<0){ const char *e=getenv("COLI_TIMERS"); g_timers = (e && *e=='1'); } return g_timers; }
+double g_qt_iss=0, g_qt_cpu=0, g_qt_tak=0;   /* QTIER-Phasen (Decode) */
 double g_dn_sub[4];                           /* DN: proj, conv+split, l2n+rec, norm+out */
 double g_tm_step=0;                           /* step() total (decode) */
 static double g_tm_win_moe=0; static int g_tm_win_n=0;
@@ -655,6 +657,9 @@ static void tm_report(void){
     if(g_dn_sub[0]+g_dn_sub[1]+g_dn_sub[2]+g_dn_sub[3]>0)
         fprintf(stderr,"[timers]   dn-sub: proj %.1f | conv %.1f | l2n+rec %.1f | norm+out %.1f ms/token\n",
             g_dn_sub[0]/g_tm_dec_tokens,g_dn_sub[1]/g_tm_dec_tokens,g_dn_sub[2]/g_tm_dec_tokens,g_dn_sub[3]/g_tm_dec_tokens);
+    if(g_qt_iss+g_qt_cpu+g_qt_tak>0)
+        fprintf(stderr,"[timers]   qtier: issue %.2f | cpu-miss %.2f | take %.2f ms/token\n",
+                g_qt_iss/g_tm_dec_tokens, g_qt_cpu/g_tm_dec_tokens, g_qt_tak/g_tm_dec_tokens);
     fprintf(stderr,"[timers] prefill: %ld tokens  dn=%.0f attn=%.0f moe=%.0f(sh=%.0f rt=%.0f) head=%.0f ms\n",
             g_tm_pre_tokens,g_tm_pre[0],g_tm_pre[1],g_tm_pre[2],g_tm_pre[3],g_tm_pre[4],g_tm_pre[5]);
 }
@@ -1104,6 +1109,31 @@ static int container_is_int4(Model *m) {
     return (tw->nbytes == want_w / 2) ? 1 : 0;
 }
 
+/* Rematerialize a slot's int8 block from its packed int4 copy on demand
+ * (~0.5 ms, no container access). Needed after the warmstart freed the int8
+ * copies of VRAM-resident experts and one of them got LFRU-evicted. */
+static void slot_ensure_int8(Model *m, Slot *s) {
+    if (s->g || !s->g4) return;
+    Cfg *c = &m->c;
+    int64_t ng = (int64_t)c->inter * c->hidden, nd = (int64_t)c->hidden * c->inter;
+    int8_t *w = malloc((size_t)(ng + ng + nd));
+    if (!w) { fprintf(stderr, "OOM slot_ensure_int8\n"); exit(1); }
+    const uint8_t *src4[3] = { s->g4, s->u4, s->d4 };
+    int64_t lens[3] = { ng, ng, nd };
+    int8_t *dst = w;
+    for (int t = 0; t < 3; t++) {
+        const uint8_t *p = src4[t];
+        for (int64_t i = 0; i < lens[t]; i += 2) {
+            uint8_t b = p[i >> 1];
+            int8_t lo = (int8_t)(b & 0xF); if (lo & 8) lo -= 16;
+            int8_t hi = (int8_t)((b >> 4) & 0xF); if (hi & 8) hi -= 16;
+            dst[i] = lo; dst[i + 1] = hi;
+        }
+        dst += lens[t];
+    }
+    s->g = w; s->u = w + ng; s->d = w + ng + ng;
+}
+
 static void expert_get(Model *m, int layer, int eid, Slot **out) {
     LCache *lc = &m->cache[layer];
     pthread_mutex_lock(&g_pilot_mx);
@@ -1386,9 +1416,59 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out) {
             for (int kk = 0; kk < K; kk++) if (idx[kk] >= 0) freq_l[idx[kk]]++;
         }
         const float *xs = x + (int64_t)s*D;
-        {
+        int shared_done = 0;
+        if (qt_ready()) {
+            /* CUDA expert tier: run the resident experts as async groups on
+             * all devices, compute the misses on the CPU (overlapped), then
+             * collect the GPU results. */
             for (int kk = 0; kk < K; kk++) {
                 Slot *e; expert_get(m, layer, idx[kk], &e);
+                if (e->g4) qt_note(layer, idx[kk], e->g4, e->u4, e->d4, e->gs, e->us, e->ds);
+            }
+            double _q0 = tm_on()? tm_now():0;
+            uint32_t qmask = qt_issue(layer, idx, K, xs);
+            double _q1 = tm_on()? tm_now():0;
+            for (int kk = 0; kk < K; kk++) {
+                if (qmask & (1u<<kk)) continue;
+                Slot *e; expert_get(m, layer, idx[kk], &e);
+                slot_ensure_int8(m, e);
+                matmul_q(g, xs, e->g, e->gs, D, I);
+                matmul_q(u, xs, e->u, e->us, D, I);
+                for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + expf(-gv))) * u[i]; }
+                matmul_q(hh, g, e->d, e->ds, I, D);
+                float w = val[kk]; float *os = out + (int64_t)s*D;
+                for (int d = 0; d < D; d++) os[d] += w * hh[d];
+            }
+            /* Compute the shared expert NOW so it overlaps with the GPU
+             * groups; the common block below is skipped. */
+            {
+                double _ts2 = tm_on() ? tm_now() : 0.0;
+                int Ish = c->shared_inter;
+                matmul_d(sh, xs, l->sh_g, 1, D, Ish);
+                matmul_d(shu, xs, l->sh_u, 1, D, Ish);
+                for (int i = 0; i < Ish; i++) { float sv = sh[i]; sh[i] = (sv / (1.f + expf(-sv))) * shu[i]; }
+                matmul_d(shd, sh, l->sh_d, 1, Ish, D);
+                float sgate = 1.f;
+                if (l->sh_gate) {
+                    float sg = 0.f; const float *wg = l->sh_gate;
+                    for (int i = 0; i < D; i++) sg += xs[i] * wg[i];
+                    sgate = 1.f / (1.f + expf(-sg));
+                }
+                float *os = out + (int64_t)s*D;
+                for (int d = 0; d < D; d++) os[d] += sgate * shd[d];
+                if (tm_on()) tm_add(S, 3, tm_now()-_ts2);
+            }
+            shared_done = 1;
+            double _q2 = tm_on()? tm_now():0;
+            qt_take(qmask, val, K, out + (int64_t)s*D);
+            if (tm_on() && S==1) {
+                extern double g_qt_iss, g_qt_cpu, g_qt_tak;
+                g_qt_iss += _q1-_q0; g_qt_cpu += _q2-_q1; g_qt_tak += tm_now()-_q2;
+            }
+        } else {
+            for (int kk = 0; kk < K; kk++) {
+                Slot *e; expert_get(m, layer, idx[kk], &e);
+                slot_ensure_int8(m, e);
                 matmul_q(g, xs, e->g, e->gs, D, I);
                 matmul_q(u, xs, e->u, e->us, D, I);
                 for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + expf(-gv))) * u[i]; }
@@ -1399,6 +1479,7 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out) {
             }
         }
         /* shared expert (SwiGLU), sigmoid-gated by shared_expert_gate */
+        if (shared_done) { if (0) goto shared_skip_dummy; shared_skip_dummy: continue; }
         double _ts = tm_on() ? tm_now() : 0.0;
         int Ish = c->shared_inter;
         matmul_d(sh, xs, l->sh_g, 1, D, Ish);
@@ -1722,9 +1803,14 @@ static void pilot_prefetch(Model *m, int lnext, const float *x, int S) {
             if (idx[b] >= 0 && (idx[a] < 0 || idx[a] > idx[b])) { int t = idx[a]; idx[a] = idx[b]; idx[b] = t; }
         for (int kk = 0; kk < cand; kk++) {
             int eid = idx[kk]; if (eid < 0) continue;
-            int found = 0; pthread_mutex_lock(&g_pilot_mx); LCache *lc = &m->cache[lnext];
-            for (int z = 0; z < lc->n; z++) if (lc->slots[z].eid == eid) { found = 1; break; }
+            int found = 0, fz = -1; pthread_mutex_lock(&g_pilot_mx); LCache *lc = &m->cache[lnext];
+            for (int z = 0; z < lc->n; z++) if (lc->slots[z].eid == eid) { found = 1; fz = z; break; }
             pthread_mutex_unlock(&g_pilot_mx);
+            /* Lookahead: RAM-resident layer-L+1 candidates go to VRAM asynchronously */
+            if (found && fz >= 0 && qt_ready()) {
+                Slot *ps = &lc->slots[fz];
+                if (ps->g4) qt_note(lnext, eid, ps->g4, ps->u4, ps->d4, ps->gs, ps->us, ps->ds);
+            }
             if (!found) {
                 int gidx = lnext*E + eid;
                 pthread_mutex_lock(&g_pilot_mx); int already_queued = m->is_queued[gidx];
@@ -1931,6 +2017,51 @@ int main(int argc, char **argv) {
                 g_qdw_n, now_s()-tq, freed/1073741824.0);
     }
 
+    /* Optional CUDA VRAM expert tier (COLI_CUDA=1): hot experts live in
+     * DEVICE_LOCAL memory across the configured GPUs, misses fall back to the
+     * CPU int8 path. See qwen36_tier.h. */
+    if (qt_init(m.c.n_layers, m.c.n_experts, m.c.hidden, m.c.inter, cap, m.c.topk)) {
+        fprintf(stderr, "[gpu] MoE experts -> CUDA VRAM tier\n");
+        atexit(qt_shutdown);
+        /* Warmstart: fill the VRAM budget BEFORE the first token (heat order
+         * when HEAT_FILE exists, natural order otherwise), loading all RAM
+         * slots along the way. */
+        const char *nws = getenv("QT_NO_WARMSTART");
+        if (!(nws && *nws=='1')) {
+            /* Plan the set (heat order), then load+stage IN PARALLEL. The
+             * load path is thread-safe: expert_get locks the layer cache
+             * (g_pilot_mx), st_read_raw uses pread; entries are unique. */
+            double t0 = now_s();
+            int cap_total = m.c.n_layers * m.c.n_experts;
+            int *wpl = malloc((size_t)cap_total*sizeof(int));
+            int *wpe = malloc((size_t)cap_total*sizeof(int));
+            int wn = qt_plan_fill(wpl, wpe, cap_total);
+            /* Load ALL experts into RAM, not just the planned (VRAM) set:
+             * otherwise the first touch of a CPU-fallback expert triggers a
+             * ~12 ms container read in the middle of decode (measured: 139
+             * ms/token on a single-GPU run). Planned ones also go to VRAM. */
+            uint8_t *planned = calloc((size_t)cap_total, 1);
+            for (int i = 0; i < wn; i++) planned[wpl[i]*m.c.n_experts + wpe[i]] = 1;
+            int keep8 = getenv("COLI_KEEP_INT8") != NULL;
+            #pragma omp parallel for schedule(dynamic, 16)
+            for (int gi = 0; gi < cap_total; gi++) {
+                int l = gi / m.c.n_experts, eidw = gi % m.c.n_experts;
+                Slot *e; expert_get(&m, l, eidw, &e);
+                if (planned[gi] && e->g4) {
+                    qt_note_planned(l, eidw, e->g4, e->u4, e->d4, e->gs, e->us, e->ds);
+                    /* The staging copy is done; free the int8 copy RIGHT AWAY
+                     * so it never shows up in peak RSS. On LFRU eviction
+                     * slot_ensure_int8() rematerializes from g4 (no container
+                     * access). */
+                    if (!keep8 && e->g) { free(e->g); e->g = e->u = e->d = NULL; }
+                }
+            }
+            qt_fill_wait();
+            free(wpl); free(wpe); free(planned);
+            fprintf(stderr, "[qtier] warmstart (parallel): all %d experts in RAM (int8 only for non-residents), %d in VRAM -- %.1f s\n",
+                    cap_total, wn, now_s()-t0);
+        }
+    }
 
     if (is_ref && getenv("PPL") && atoi(getenv("PPL")) == 1) {
         double nll; double t = now_s();
@@ -1999,6 +2130,7 @@ int main(int argc, char **argv) {
     double tot = m.hits + m.miss;
     if (g_ttft >= 0) fprintf(stderr, "TTFT: %.2f s (time to first token)\n", g_ttft);
     tm_report();
+    qt_stats();
     fprintf(stderr, "\nPEAK RSS: %.2f GB\n", rss_gb());
     fprintf(stderr, "Expert cache hit rate: %.1f%% (hit=%llu miss=%llu)\n", tot?100.0*m.hits/tot:0.0,
            (unsigned long long)m.hits, (unsigned long long)m.miss);

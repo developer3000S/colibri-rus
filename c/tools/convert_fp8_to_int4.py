@@ -374,6 +374,15 @@ def check_or_record_params(outdir, prefix, params):
 def _bits(v):                                   # "e8" -> fmt=6 marker; anything else an int width
     return E8 if v == E8 else int(v)
 
+def source_label(a):
+    if a.selftest or a.selftest_nvfp4:
+        return "selftest"
+    if a.indir:
+        return "local " + a.indir
+    if a.repo:
+        return "download " + a.repo
+    raise SystemExit("one of --indir or --repo is required")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=None)
@@ -476,7 +485,7 @@ def main():
     mode = "MTP head only" if a.mtp else "DSA indexer only" if a.indexer else "main model"
     grp = f"grouped gs={a.group_size} (fmt=4)" if (a.group_size and a.ebits <= 4) else \
           (f"PER-ROW (grouped branch needs bits<=4; ebits={a.ebits} disables it)" if a.group_size else "per-row")
-    print(f"[PLAN] mode: {mode} | source: {'local ' + a.indir if a.indir else 'download ' + a.repo} | "
+    print(f"[PLAN] mode: {mode} | source: {source_label(a)} | "
           f"experts {a.ebits}-bit, embed/lm_head {a.io_bits}-bit, x {a.xbits}-bit | {grp}")
 
     if a.selftest_nvfp4:

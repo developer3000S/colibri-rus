@@ -61,6 +61,7 @@ Flags may also be given **after** the subcommand. Most flags map onto an engine 
 | `--model-id` | `$COLI_MODEL_ID` or `glm-5.2-colibri` | Model id reported by the API. |
 | `--api-key` | `$COLI_API_KEY` | Require this bearer token. |
 | `--cors-origin` | none (repeatable) | Allowed CORS origin(s). |
+| `--allowed-host` | `$COLI_ALLOWED_HOSTS` or none (repeatable) | Additional Host header accepted by the DNS-rebinding guard. |
 | `--max-queue` | `$COLI_MAX_QUEUE` or `8` | Max queued requests. |
 | `--queue-timeout` | `$COLI_QUEUE_TIMEOUT` or `300` | Seconds a request may wait. |
 | `--kv-slots` | `$COLI_KV_SLOTS` or `1` | Independent KV conversation slots (→ `KV_SLOTS`). |
@@ -162,6 +163,7 @@ Run directly (or via `coli serve`). OpenAI-compatible `/v1/chat/completions`.
 | `--model-id` | `$COLI_MODEL_ID` or `glm-5.2-colibri` | Model id in API responses. |
 | `--api-key` | `$COLI_API_KEY` | Required bearer token. |
 | `--cors-origin` | none (repeatable) | Allowed CORS origin(s). |
+| `--allowed-host` | `$COLI_ALLOWED_HOSTS` or none (repeatable) | Additional Host header accepted by the DNS-rebinding guard. |
 | `--cap` | `8` | Expert-cache cap. |
 | `--max-tokens` | `1024` | Default max completion tokens. |
 | `--max-queue` | `$COLI_MAX_QUEUE` or `8` | Max queued requests. |

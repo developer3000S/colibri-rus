@@ -356,7 +356,11 @@ def cuda_linkage(engine_path):
                                     timeout=3, check=False)
         except (OSError, subprocess.SubprocessError):
             return {"linked": False, "missing": False}
-        lines = [line for line in result.stdout.splitlines() if "libcudart" in line]
+        # A HIP/ROCm build links libamdhip64 (never libcudart), so match both
+        # vendors here or a working AMD engine is reported CPU-only (#663). Mirrors
+        # the vendor-aware probe cuda_binary() already uses in c/coli.
+        lines = [line for line in result.stdout.splitlines()
+                 if "libcudart" in line or "libamdhip64" in line]
         return {"linked": any("not found" not in line for line in lines),
                 "missing": any("not found" in line for line in lines)}
     if sys.platform == "win32":

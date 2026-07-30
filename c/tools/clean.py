@@ -11,14 +11,21 @@ import shutil
 # Files (relative to c/) to remove if present.
 FILES = [
     "olmoe", "olmoe.exe",
+    "inkling", "inkling.exe",
+    "kimi_k3", "kimi_k3.exe",
     "colibri", "colibri.exe",
     "glm", "glm.exe",
     "iobench", "iobench.exe",
-    "backend_cuda.o", "backend_loader.o",
+    "backend_cuda.o", "backend_loader.o", "backend_vulkan.o",
     "backend_cuda_test", "backend_cuda_test.exe",
     "backend_cuda_bench", "backend_cuda_bench.exe",
     "backend_metal.o", "backend_metal_test",
+    "ragged_attention_test", "ragged_attention_test.exe",
     "coli_cuda.dll", "coli_cuda.lib", "coli_cuda.exp",
+    "tools/librans_c.so", "tools/librans_c.dylib", "tools/rans_c.dll",
+    "shaders/qmatmul_gate_up.spv",
+    "shaders/attention_absorb.spv",
+    "shaders/rmsnorm.spv",
 ]
 # Test binaries are extensionless on Unix and `.exe` on Windows.  Keep the
 # basenames explicit so clean can never mistake a source/fixture for an output.
@@ -27,11 +34,12 @@ TEST_BASENAMES = [
     "test_schema_gbnf", "test_decode_batch", "test_idot",
     "test_i4_grouped", "test_stops", "test_topp", "test_kv_alloc",
     "test_i4_acc512", "test_compat_direct", "test_dsa_select",
-    "test_int3", "test_int3_load", "test_logit_nan", "test_pipe_block",
-    "test_sample_nan", "test_tok_o200k", "test_efficiency_report",
+    "test_int3", "test_int3_load", "test_logit_nan", "test_router_nan",
+    "test_pipe_block", "test_sample_nan", "test_temp_env", "test_tok_o200k",
+    "test_efficiency_report", "test_rans", "test_corpus_draft", "test_pilot_ring",
     "test_uring", "test_rammap", "test_resource_masks", "test_e8_kernel",
 ]
-ON_DEMAND_BASENAMES = ["bench_topp", "bench_dsa_select"]
+ON_DEMAND_BASENAMES = ["bench_topp", "bench_dsa_select", "fuzz_rans"]
 TEST_GLOBS = [
     "tests/%s%s" % (name, suffix)
     for name in TEST_BASENAMES + ON_DEMAND_BASENAMES

@@ -549,7 +549,7 @@ __global__ static void attention_absorb_batch_kernel(float *ctx,const float *q,
 __global__ static void attention_absorb_ragged_kernel(float *ctx,const float *q,
         const float *const *latent,const float *const *rope,const int *lengths,
         const void *weights,const float *wscale,int fmt,int S,int H,int Q,int R,
-        int V,int K,int T,float scale){
+        int V,int K,int T,float scale,int gs,int ng){
     int s=blockIdx.y,h=blockIdx.x,tid=threadIdx.x,nt=lengths[s],rbase=h*(Q+V);
     if(s>=S||nt<1||nt>T)return;
     extern __shared__ float sm[];float *qa=sm,*cl=qa+K,*scores=cl+K,*red=scores+T;
@@ -557,7 +557,7 @@ __global__ static void attention_absorb_ragged_kernel(float *ctx,const float *q,
     const float *ls=latent[s],*rs=rope[s];
     for(int k=tid;k<K;k+=blockDim.x){float a=0;for(int d=0;d<Q;d++)
         a+=qs[d]*weight_at(weights,fmt,(size_t)(rbase+d)*row_bytes(fmt,K),k)*
-          (fmt?wscale[rbase+d]:1.f);qa[k]=a;}
+          absorb_scale(wscale,fmt,gs,ng,rbase+d,k);qa[k]=a;}
     __syncthreads();
     for(int t=tid;t<nt;t+=blockDim.x){float a=0;const float *lt=ls+(size_t)t*K;
         const float *rt=rs+(size_t)t*R;for(int k=0;k<K;k++)a+=qa[k]*lt[k];
@@ -574,8 +574,9 @@ __global__ static void attention_absorb_ragged_kernel(float *ctx,const float *q,
     for(int k=tid;k<K;k+=blockDim.x){float a=0;for(int t=0;t<nt;t++)a+=scores[t]*ls[(size_t)t*K+k];cl[k]=a;}
     __syncthreads();
     for(int v=tid;v<V;v+=blockDim.x){int row=rbase+Q+v;float a=0;size_t rb=row_bytes(fmt,K);
-        for(int k=0;k<K;k++)a+=cl[k]*weight_at(weights,fmt,(size_t)row*rb,k);
-        ctx[((size_t)s*H+h)*V+v]=a*(fmt?wscale[row]:1.f);}
+        for(int k=0;k<K;k++)a+=cl[k]*weight_at(weights,fmt,(size_t)row*rb,k)*
+            absorb_scale(wscale,fmt,gs,ng,row,k);
+        ctx[((size_t)s*H+h)*V+v]=a;}
 }
 
 __global__ static void ragged_kv_append(float *const *latent,float *const *rope,
@@ -976,7 +977,11 @@ extern "C" int coli_cuda_expert_group(ColiCudaTensor *const *gates,
     if(profile) cudaEventRecord(ev[1],ctx->stream);
     GroupDesc *dev=(GroupDesc*)ctx->group_desc;
     int tc=getenv("COLI_CUDA_TC_INT4")&&atoi(getenv("COLI_CUDA_TC_INT4"));
-    tc=tc&&all_s4&&D%32==0&&I%32==0&&D%8==0&&I%8==0;
+    /* grouped_s4_wmma's body needs __CUDA_ARCH__>=750: on builds where the
+     * WMMA kernels are compiled out (COLI_HIP_NO_WMMA) the launch would
+     * succeed with an EMPTY kernel and the output buffer would silently keep
+     * stale data. Gate the branch like TC_W4A16 below does. */
+    tc=tc&&COLI_GPU_HAS_WMMA&&all_s4&&D%32==0&&I%32==0&&D%8==0&&I%8==0;
     int tc_min=getenv("COLI_CUDA_TC_MIN_ROWS")?atoi(getenv("COLI_CUDA_TC_MIN_ROWS")):8;
     for(int c=0;c<count&&tc;c++)tc=rows[c]>=tc_min;
     if(tc){
@@ -1308,7 +1313,7 @@ extern "C" int coli_cuda_attention_project_ragged(ColiCudaTensor *w,ColiCudaTens
     std::free(dl);std::free(dr);std::free(old);std::free(add);std::free(off);if(!ok)return 0;
     size_t shared=(size_t)(2*K+T+256)*sizeof(float);
     attention_absorb_ragged_kernel<<<dim3(H,S),256,shared,dc->stream>>>(dc->ac,dc->aq,ddl,ddr,
-        dn,w->weights,w->scales,w->fmt,S,H,Q,R,V,K,T,scale);
+        dn,w->weights,w->scales,w->fmt,S,H,Q,R,V,K,T,scale,w->gs,w->ng);
     quant_matmul<<<dim3(proj->O,S),256,0,dc->stream>>>(dc->y,dc->ac,proj->weights,
         proj->scales,proj->fmt,S,proj->I,proj->O,row_bytes(proj->fmt,proj->I),proj->gs,proj->ng);
     return cuda_ok(cudaGetLastError(),"ragged attention launch")&&

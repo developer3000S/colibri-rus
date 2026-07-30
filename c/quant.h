@@ -295,10 +295,62 @@ static void matmul_i2(float *y, const float *x, const uint8_t *q2, const float *
 static inline int64_t i3_groups(int I){ return ((int64_t)I + I3_GROUP - 1) / I3_GROUP; }
 static inline int64_t i3_rowbytes(int I){ return i3_groups(I) * I3_GBYTES; }
 
+#if defined(__AVX512F__) && defined(__AVX512BW__)
+static int g_i3_avx512=1;
+/* one full 64-value group -> f32 partial. Relies on immintrin.h arriving via the
+ * __AVX2__-gated include above (AVX512F implies AVX2 on clang/gcc/MSVC), same as
+ * dot_i4f_avx512. */
+static inline float dot_i3g64_avx512(const uint8_t *lo, const uint8_t *hi, const float *x){
+    const __m128i m2=_mm_set1_epi8(3); const __m512i c4=_mm512_set1_epi8(4);
+    __m128i by=_mm_loadu_si128((const __m128i*)lo);
+    __m128i p0=_mm_and_si128(by,m2),                   p1=_mm_and_si128(_mm_srli_epi16(by,2),m2);
+    __m128i p2=_mm_and_si128(_mm_srli_epi16(by,4),m2), p3=_mm_and_si128(_mm_srli_epi16(by,6),m2);
+    __m128i l01=_mm_unpacklo_epi8(p0,p1), h01=_mm_unpackhi_epi8(p0,p1);
+    __m128i l23=_mm_unpacklo_epi8(p2,p3), h23=_mm_unpackhi_epi8(p2,p3);
+    __m512i lov=_mm512_inserti32x4(_mm512_inserti32x4(_mm512_inserti32x4(
+        _mm512_castsi128_si512(_mm_unpacklo_epi16(l01,l23)),
+        _mm_unpackhi_epi16(l01,l23),1),
+        _mm_unpacklo_epi16(h01,h23),2),
+        _mm_unpackhi_epi16(h01,h23),3);            /* byte k = low 2 bits of value k */
+    uint64_t hb; memcpy(&hb,hi,8);                 /* mask bit k = high bit of value k */
+    __m512i wq=_mm512_sub_epi8(_mm512_mask_add_epi8(lov,(__mmask64)hb,lov,c4),c4); /* [-4,3] in order */
+    __m512 ac0=_mm512_setzero_ps(), ac1=_mm512_setzero_ps();
+    ac0=_mm512_fmadd_ps(_mm512_loadu_ps(x),    _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_castsi512_si128(wq))),      ac0);
+    ac1=_mm512_fmadd_ps(_mm512_loadu_ps(x+16), _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(wq,1))), ac1);
+    ac0=_mm512_fmadd_ps(_mm512_loadu_ps(x+32), _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(wq,2))), ac0);
+    ac1=_mm512_fmadd_ps(_mm512_loadu_ps(x+48), _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(wq,3))), ac1);
+    return _mm512_reduce_add_ps(_mm512_add_ps(ac0,ac1));
+}
+static int i3_avx512_selftest(void){
+    /* fixed group, asymmetric in every lane: pseudo-random 3-bit values with
+     * distinct nonzero integer activations. All terms and partials are small
+     * integers (exact in f32 under ANY summation order), so the compare is
+     * exact — any lane permutation, bias error or plane mix-up shifts the sum. */
+    uint8_t lo[16]={0}, hi[8]={0}; float x[I3_GROUP]; double ref=0;
+    uint64_t r=0x9E3779B97F4A7C15ull;
+    for(int k=0;k<I3_GROUP;k++){
+        r^=r<<13; r^=r>>7; r^=r<<17;
+        unsigned u=(unsigned)(r&7);
+        lo[k>>2]|=(uint8_t)((u&3)<<((k&3)*2));
+        hi[k>>3]|=(uint8_t)((u>>2)<<(k&7));
+        x[k]=(k&1)?-(float)(k+1):(float)(k+1);
+        ref+=(double)x[k]*((int)u-4);
+    }
+    float got=dot_i3g64_avx512(lo,hi,x);
+    if(got!=(float)ref){ fprintf(stderr,"AVX512 i3 selftest: %.9g != %.9g\n",got,ref); return 0; }
+    return 1;
+}
+#endif
+
 /* Dequant-on-use with PER-GROUP scale. Exact f32 path only (no IDOT in v1: int8
  * activations don't compose with per-group accumulation without a kernel
  * restructure — follow-up). NEON: low plane = matmul_i2's unpack, high plane
- * expanded via vtst on bit masks; x86 stays scalar for now (follow-up). */
+ * expanded via vtst on bit masks. AVX-512(F+BW): same unpack at 128-bit, high
+ * plane loaded as a __mmask64 (bit k = value k) driving a masked +4; one full
+ * group per iteration (dot_i3g64_avx512; I3_AVX512=0 falls back to scalar).
+ * Other x86 stays scalar (follow-up). Both vector arms reorder fma WITHIN a
+ * group only; the per-group partial is scaled by scale[g] and added to the
+ * row accumulator in scalar order, exactly like the scalar loop. */
 static void matmul_i3(float *y, const float *x, const uint8_t *q3, const float *scale, int S, int I, int O){
     int64_t ng=i3_groups(I), rb=i3_rowbytes(I);
     #pragma omp parallel for schedule(static)
@@ -312,7 +364,9 @@ static void matmul_i3(float *y, const float *x, const uint8_t *q3, const float *
                 const uint8_t *lo=wrow+g*I3_GBYTES, *hi=lo+16;
                 int base=(int)(g*I3_GROUP), n = I-base < I3_GROUP ? I-base : I3_GROUP;
                 float a=0; int k=0;
-#if defined(__ARM_NEON)
+#if defined(__AVX512F__) && defined(__AVX512BW__)
+                if(g_i3_avx512 && n==I3_GROUP){ a=dot_i3g64_avx512(lo,hi,xs+base); k=I3_GROUP; }
+#elif defined(__ARM_NEON)
                 if(n==I3_GROUP){
                     const uint8x8_t m2v=vdup_n_u8(3); const int8x16_t b4q=vdupq_n_s8(4);
                     const uint8x16_t bitm={1,2,4,8,16,32,64,128,1,2,4,8,16,32,64,128};
@@ -1183,6 +1237,148 @@ static inline void e8_rot_rows(float *rows, int nr, int dim){
         for(int r=0;r<nr;r++) e8_fwht(rows+(int64_t)r*dim+off,b,bits);
         off+=b;
     }
+}
+
+/* ---- MXFP4 (OCP microscaling FP4) ----------------------------------------
+ * The native layout of compressed-tensors "mxfp4-pack-quantized" checkpoints
+ * (Kimi K3 routed experts are QAT in this format — pass-through, never
+ * re-encoded):
+ *   packed [O, I/2]  u8 — e2m1 nibbles, LOW nibble = even column, bit3 = sign,
+ *                         bits 0..2 index {0,.5,1,1.5,2,3,4,6}
+ *   scales [O, I/32] u8 — ue8m0 exponent per 32-column group, w = v * 2^(s-127)
+ * = 4.25 bits/weight all-in. The exponent is decoded with the bit trick
+ * (s<<23 as a float): exact for s in [1,254]; s=0 (2^-127, denormal) decodes
+ * to +0 and s=255 to +inf on BOTH the scalar and SIMD paths, so the two stay
+ * bit-identical — real checkpoints never contain either. */
+static const float mx4_lut[16] = {0.f,.5f,1.f,1.5f,2.f,3.f,4.f,6.f,
+                                  -0.f,-.5f,-1.f,-1.5f,-2.f,-3.f,-4.f,-6.f};
+static inline float mx4_scale(uint8_t s){
+    union { uint32_t u; float f; } b; b.u = (uint32_t)s << 23; return b.f;
+}
+static void matmul_mxfp4(float *y, const float *x, const uint8_t *q4, const uint8_t *e8s,
+                         int S, int I, int O){
+    int rb=(I+1)/2, ng=(I+31)/32;
+    #pragma omp parallel for schedule(static)
+    for(int o=0;o<O;o++){
+        const uint8_t *w=q4+(int64_t)o*rb;
+        const uint8_t *scl=e8s+(int64_t)o*ng;
+        for(int s=0;s<S;s++){
+            const float *xs=x+(int64_t)s*I; float a=0;
+#ifdef __AVX2__
+            if(I%32==0){
+                /* doubled e2m1 values are exact int8 -> one pshufb decodes a
+                 * nibble vector; the 0.5f un-doubling rides the group scale */
+                const __m128i lut2=_mm_setr_epi8(0,1,2,3,4,6,8,12,0,-1,-2,-3,-4,-6,-8,-12);
+                const __m128i m4=_mm_set1_epi8(0x0F);
+                __m256 acc=_mm256_setzero_ps();
+                for(int g=0;g<ng;g++){
+                    __m128i by=_mm_loadu_si128((const __m128i*)(w+g*16));
+                    __m128i lo=_mm_and_si128(by,m4), hi=_mm_and_si128(_mm_srli_epi16(by,4),m4);
+                    __m128i n0=_mm_shuffle_epi8(lut2,_mm_unpacklo_epi8(lo,hi));  /* cols g*32+0..15  */
+                    __m128i n1=_mm_shuffle_epi8(lut2,_mm_unpackhi_epi8(lo,hi));  /* cols g*32+16..31 */
+                    const float *xg=xs+g*32;
+                    __m256 ga=_mm256_mul_ps(_mm256_loadu_ps(xg),
+                                            _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(n0)));
+                    ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+8),
+                                       _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(n0,8))),ga);
+                    ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+16),
+                                       _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(n1)),ga);
+                    ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+24),
+                                       _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(n1,8))),ga);
+                    acc=_mm256_fmadd_ps(ga,_mm256_set1_ps(mx4_scale(scl[g])*0.5f),acc);
+                }
+                y[(int64_t)s*O+o]=hsum256(acc);
+                continue;
+            }
+#endif
+            for(int g=0;g<ng;g++){
+                int base=g*32, glen=32; if(base+glen>I) glen=I-base;
+                float sc=mx4_scale(scl[g]), ga=0;
+                for(int i=base;i<base+glen;i+=2){
+                    uint8_t byte=w[i>>1];
+                    ga+=xs[i]*mx4_lut[byte&0xF];
+                    if(i+1<base+glen) ga+=xs[i+1]*mx4_lut[byte>>4];
+                }
+                a+=ga*sc;
+            }
+            y[(int64_t)s*O+o]=a;
+        }
+    }
+}
+
+/* IDOT variant of matmul_mxfp4: per-32-group int8 activation quantization +
+ * integer dots. The doubled e2m1 values are exact int8 (same LUT as the float
+ * path), so a group reduces to maddubs(|w|, sign(x,w)) like dot_i4i8 — no
+ * per-weight int->float conversion. Group-exact scale folding:
+ *     y = sum_g idot_g * (2^(e8-127) * 0.5) * xscale_g
+ * Activation-quant noise (~0.4%/group) rides on top of the e2m1 grid; gate
+ * with K3_IDOT=0 in the K3 engine for exact-float A/B. */
+static void matmul_mxfp4_i8(float *y, const float *x, const uint8_t *q4, const uint8_t *e8s,
+                            int S, int I, int O){
+    if(I%32){ matmul_mxfp4(y,x,q4,e8s,S,I,O); return; }
+    int rb=I/2, ng=I/32;
+    int8_t *xq=(int8_t*)malloc((size_t)S*I);
+    float *xsc=(float*)malloc((size_t)S*ng*sizeof(float));
+    if(!xq||!xsc){ fprintf(stderr,"OOM mxfp4 idot scratch\n"); exit(1); }
+    for(int s=0;s<S;s++)
+        for(int g=0;g<ng;g++){
+            const float *xg=x+(int64_t)s*I+g*32;
+            float am=0; for(int i=0;i<32;i++){ float a=fabsf(xg[i]); if(a>am)am=a; }
+            float sc=am/127.f; if(sc<1e-20f)sc=1e-20f;
+            xsc[(int64_t)s*ng+g]=sc; float inv=1.f/sc;
+            int8_t *qg=xq+(int64_t)s*I+g*32;
+            for(int i=0;i<32;i++){
+                int v=(int)lrintf(xg[i]*inv);
+                if(v>127)v=127; if(v<-127)v=-127; qg[i]=(int8_t)v;
+            }
+        }
+    #pragma omp parallel for schedule(static)
+    for(int o=0;o<O;o++){
+        const uint8_t *w=q4+(int64_t)o*rb;
+        const uint8_t *scl=e8s+(int64_t)o*ng;
+        for(int s=0;s<S;s++){
+            const int8_t *xr=xq+(int64_t)s*I;
+            const float *xsr=xsc+(int64_t)s*ng;
+#ifdef __AVX2__
+            {
+                const __m128i lut2=_mm_setr_epi8(0,1,2,3,4,6,8,12,0,-1,-2,-3,-4,-6,-8,-12);
+                const __m128i m4=_mm_set1_epi8(0x0F);
+                const __m256i ones=_mm256_set1_epi16(1);
+                __m256 acc=_mm256_setzero_ps();
+                for(int g=0;g<ng;g++){
+                    __m128i by=_mm_loadu_si128((const __m128i*)(w+g*16));
+                    __m128i lo=_mm_and_si128(by,m4), hi=_mm_and_si128(_mm_srli_epi16(by,4),m4);
+                    __m128i n0=_mm_shuffle_epi8(lut2,_mm_unpacklo_epi8(lo,hi));
+                    __m128i n1=_mm_shuffle_epi8(lut2,_mm_unpackhi_epi8(lo,hi));
+                    __m256i wv=_mm256_set_m128i(n1,n0);        /* signed doubled e2m1 */
+                    __m256i xv=_mm256_loadu_si256((const __m256i*)(xr+g*32));
+                    /* |w| <= 12, |x| <= 127: pair sums <= 3048, no int16 overflow */
+                    __m256i p=_mm256_maddubs_epi16(_mm256_sign_epi8(wv,wv),
+                                                   _mm256_sign_epi8(xv,wv));
+                    acc=_mm256_fmadd_ps(_mm256_cvtepi32_ps(_mm256_madd_epi16(p,ones)),
+                                        _mm256_set1_ps(mx4_scale(scl[g])*0.5f*xsr[g]),acc);
+                }
+                y[(int64_t)s*O+o]=hsum256(acc);
+                continue;
+            }
+#endif
+            {
+                static const int8_t l2[16]={0,1,2,3,4,6,8,12,0,-1,-2,-3,-4,-6,-8,-12};
+                float a=0;
+                for(int g=0;g<ng;g++){
+                    const int8_t *qg=xr+g*32;
+                    int32_t gi=0;
+                    for(int i=0;i<32;i+=2){
+                        uint8_t byte=w[(g*32+i)>>1];
+                        gi+=(int32_t)l2[byte&0xF]*qg[i]+(int32_t)l2[byte>>4]*qg[i+1];
+                    }
+                    a+=(float)gi*(mx4_scale(scl[g])*0.5f*xsr[g]);
+                }
+                y[(int64_t)s*O+o]=a;
+            }
+        }
+    }
+    free(xq); free(xsc);
 }
 
 static void matmul_e8(float *y, const float *x, const uint8_t *q, const float *unused,

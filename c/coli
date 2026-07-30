@@ -271,13 +271,44 @@ def hline(w): return f"{C.dgray}{'─'*w}{C.r}"
 # ---------- util ----------
 def term_w(): return min(shutil.get_terminal_size((80,20)).columns, 100)
 
-def need_model(model):
+def model_arch(model):
+    try:
+        with open(os.path.join(model, "config.json"), encoding="utf-8") as f:
+            model_type = (json.load(f).get("model_type") or "").lower()
+    except (OSError, ValueError, TypeError):
+        return "glm"
+    if "inkling" in model_type:
+        return "inkling"
+    if "kimi" in model_type:
+        return "kimi"
+    return "glm"
+
+def engine_for(model):
+    arch = model_arch(model)
+    if arch == "glm" or os.environ.get("COLI_ENGINE"):
+        return GLM
+    name = "inkling" if arch == "inkling" else "kimi_k3"
+    local = os.path.join(HERE, name + _EXE)
+    return local if os.path.exists(local) else os.path.join(_LIBEXEC, name + _EXE)
+
+def need_model(model, engine=None):
     if not os.path.isdir(model):
         sys.exit(f"{C.yel}model not found:{C.r} {model}\n  set COLI_MODEL or use --model")
     if not os.path.exists(os.path.join(model,"tokenizer.json")):
         sys.exit(f"{C.yel}tokenizer.json is missing from {model}{C.r}")
-    if not os.path.exists(GLM):
-        sys.exit(f"{C.yel}engine is not built.{C.r} Run: coli build")
+    engine = engine or engine_for(model)
+    if not os.path.exists(engine):
+        arch = model_arch(model)
+        target = "kimi_k3" if arch == "kimi" else "inkling" if arch == "inkling" else "colibri"
+        sys.exit(f"{C.yel}{target} engine is not built.{C.r} Run: make -C c {target}")
+
+def env_for_engine(a, arch):
+    if arch == "glm":
+        return env_for(a)
+    env = os.environ.copy()
+    if a.ngen: env["NGEN"] = str(a.ngen)
+    if a.temp is not None: env["COLI_TEMP"] = str(a.temp)
+    return env
 
 def cuda_binary():
     if not os.path.exists(GLM): return False
@@ -302,8 +333,11 @@ def cuda_binary():
 
 def resource_request(a, env):
     ctx=a.ctx or int(env.get("CTX",4096))
-    ram=a.ram or float(env.get("RAM_GB",0))
-    vram=a.vram or float(env.get("CUDA_EXPERT_GB",0))
+    def num(v):
+        try: return float(v)
+        except ValueError: return 0.0  # "auto": the planner sizes it; the engine reads the string itself
+    ram=a.ram or num(env.get("RAM_GB",0))
+    vram=a.vram or num(env.get("CUDA_EXPERT_GB",0))
     gpu=a.gpu
     if gpu is None:
         gpu=env.get("COLI_GPUS",env.get("COLI_GPU","auto"))
@@ -819,6 +853,34 @@ def cmd_chat(a):
             chat_attached(a, base, mid); return
         if getattr(a,"attach",None):
             sys.exit(f"--attach: no coli serve answering at {base} (start one with: coli serve --model <dir>)")
+    arch=model_arch(a.model)
+    if arch!="glm":
+        engine=engine_for(a.model)
+        need_model(a.model,engine)
+        model_id="kimi-k3-colibri" if arch=="kimi" else "inkling-colibri"
+        banner(f"chat · {model_id} · local server")
+        import openai_server
+        cmd=[sys.executable,openai_server.__file__,"--model",a.model,
+             "--engine",engine,"--arch",arch,"--model-id",model_id,
+             "--host","127.0.0.1","--port","8000","--max-tokens",str(a.ngen)]
+        if a.api_key: cmd+=["--api-key",a.api_key]
+        p=subprocess.Popen(cmd,env=env_for_engine(a,arch))
+        try:
+            sp=Spinner(f"loading {model_id}…"); sp.start()
+            for _ in range(1800):
+                if p.poll() is not None:
+                    sp.stop(); sys.exit(f"{model_id} server exited while loading")
+                if server_probe("http://127.0.0.1:8000",a.api_key,timeout=1.0):
+                    sp.stop()
+                    chat_attached(a,"http://127.0.0.1:8000",model_id)
+                    return
+                time.sleep(1)
+            sp.stop(); sys.exit(f"timed out loading {model_id}")
+        finally:
+            if p.poll() is None:
+                p.terminate()
+                try: p.wait(timeout=10)
+                except subprocess.TimeoutExpired: p.kill()
     need_model(a.model)
     banner(f"chat · {os.path.basename(a.model)} · ram {a.ram or '-'}GB · topp {a.topp or 'off'}")
     kv_resume_notice(a.model)
@@ -980,7 +1042,9 @@ def _stop_process_facts(pid):
     wrapper=serve_index>0 and any(
         os.path.basename(value)=="coli" for value in argv[:serve_index]
     )
-    engine=comm in ("colibri","glm","exe","olmoe") and b"SERVE=1" in environ
+    engine=comm in (
+        "colibri","glm","exe","olmoe","inkling","kimi_k3"
+    ) and b"SERVE=1" in environ
     if not wrapper and not engine: return None
     return {
         "pid":int(pid),
@@ -1040,17 +1104,24 @@ def _close_stop_targets(targets):
             except OSError: pass
 
 def cmd_serve(a):
-    need_model(a.model)
+    arch=model_arch(a.model)
+    engine=engine_for(a.model)
+    need_model(a.model,engine)
+    if arch!="glm" and a.kv_slots!=1:
+        sys.exit(f"{arch} currently supports exactly one KV slot")
     # pidfile: cosi' `coli stop` spegne tutto con un comando, senza pkill a mano.
     # EN: pidfile so `coli stop` can shut everything down without manual pkill.
     try:
         with open(serve_pidfile(a.port),"w") as f: f.write(f"{os.getpid()} {a.model}\n")
     except OSError: pass
-    from openai_server import serve
+    import openai_server
+    openai_server.ARCH=arch
+    model_id=a.model_id or ("kimi-k3-colibri" if arch=="kimi" else
+                            "inkling-colibri" if arch=="inkling" else "glm-5.2-colibri")
     try:
-        serve(a.model, a.host, a.port, a.model_id, a.api_key,
-              a.cap,a.ngen,GLM,env_for(a),a.cors_origin,
-              a.max_queue,a.queue_timeout,a.kv_slots)
+        openai_server.serve(a.model,a.host,a.port,model_id,a.api_key,
+              a.cap,a.ngen,engine,env_for_engine(a,arch),a.cors_origin,
+              a.max_queue,a.queue_timeout,a.kv_slots,allowed_hosts=a.allowed_host)
     finally:
         try: os.unlink(serve_pidfile(a.port))
         except OSError: pass
@@ -1234,22 +1305,28 @@ def main(argv=None):
     pc.add_argument("--api-key", default=os.environ.get("COLI_API_KEY"))
     ps=sub.add_parser("serve", parents=[common])
     ps.add_argument("--host",default="127.0.0.1"); ps.add_argument("--port",type=int,default=8000)
-    ps.add_argument("--model-id",default=os.environ.get("COLI_MODEL_ID","glm-5.2-colibri"))
+    ps.add_argument("--model-id",default=os.environ.get("COLI_MODEL_ID"))
     ps.add_argument("--api-key",default=os.environ.get("COLI_API_KEY"))
     ps.add_argument("--cors-origin",action="append",default=None)
     ps.add_argument("--max-queue",type=int,default=int(os.environ.get("COLI_MAX_QUEUE","8")))
     ps.add_argument("--queue-timeout",type=float,default=float(os.environ.get("COLI_QUEUE_TIMEOUT","300")))
     ps.add_argument("--kv-slots",type=int,default=int(os.environ.get("COLI_KV_SLOTS","1")))
+    ps.add_argument("--allowed-host",action="append",
+        default=[h.strip() for h in os.environ.get("COLI_ALLOWED_HOSTS","").split(",") if h.strip()],
+        help="additional Host header accepted by the DNS-rebinding guard; repeat as needed")
     pst=sub.add_parser("stop", parents=[common], help="shut down a running coli serve and its engine")
     pst.add_argument("--port",type=int,default=8000); pst.add_argument("--dry-run",action="store_true")
     pw=sub.add_parser("web", parents=[common], help="serve + open the dashboard in a browser")
     for arg,kw in (("--host",dict(default="127.0.0.1")),("--port",dict(type=int,default=8000)),
-                   ("--model-id",dict(default=os.environ.get("COLI_MODEL_ID","glm-5.2-colibri"))),
+                   ("--model-id",dict(default=os.environ.get("COLI_MODEL_ID"))),
                    ("--api-key",dict(default=os.environ.get("COLI_API_KEY"))),
                    ("--cors-origin",dict(action="append",default=None)),
                    ("--max-queue",dict(type=int,default=int(os.environ.get("COLI_MAX_QUEUE","8")))),
                    ("--queue-timeout",dict(type=float,default=float(os.environ.get("COLI_QUEUE_TIMEOUT","300")))),
-                   ("--kv-slots",dict(type=int,default=int(os.environ.get("COLI_KV_SLOTS","1"))))):
+                   ("--kv-slots",dict(type=int,default=int(os.environ.get("COLI_KV_SLOTS","1")))),
+                   ("--allowed-host",dict(action="append",
+                       default=[h.strip() for h in os.environ.get("COLI_ALLOWED_HOSTS","").split(",") if h.strip()],
+                       help="additional Host header accepted by the DNS-rebinding guard; repeat as needed"))):
         pw.add_argument(arg,**kw)
     pw.add_argument("--no-browser",action="store_true",help="don't auto-open the browser")
     pb=sub.add_parser("bench", parents=[common]); pb.add_argument("tasks", nargs="*")

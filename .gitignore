@@ -16,6 +16,8 @@ c/glm
 c/glm.exe
 c/olmoe
 c/inkling
+c/kimi_k3
+c/kimi_k3.exe
 c/olmoe.exe
 c/iobench
 c/iobench.exe
@@ -80,6 +82,7 @@ olmoe_merged/
 olmoe_i4/
 c/olmoe_merged/
 c/olmoe_i4/
+.idea
 c/tiny_inkling/
 c/tests/test_rammap
 c/tests/test_rammap.exe

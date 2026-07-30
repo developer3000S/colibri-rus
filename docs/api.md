@@ -46,6 +46,19 @@ and token penalties return an explicit error
 rather than being silently ignored. The default bind address is localhost; set
 `COLI_API_KEY` before exposing the server beyond the machine.
 
+When a reverse proxy or MagicDNS hostname preserves a public `Host` header,
+trust that exact hostname with repeatable `--allowed-host` options. The
+comma-separated `COLI_ALLOWED_HOSTS` environment variable is equivalent:
+
+```bash
+COLI_ALLOWED_HOSTS=llm.example.com ./coli serve --model /nvme/glm52_i4
+# or: ./coli serve --model /nvme/glm52_i4 --allowed-host llm.example.com
+```
+
+Only configure hostnames or IP addresses you control; there is no wildcard.
+This setting extends the DNS-rebinding allowlist and is independent of CORS and
+API-key authentication.
+
 Browser access from the Vite development server and Tauri local origins is
 enabled by default. Repeat `--cors-origin https://your-ui.example` to allow
 another exact origin, or use `--cors-origin '*'` only on a trusted local

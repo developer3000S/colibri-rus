@@ -28,6 +28,11 @@ class CliOutputLanguageTest(unittest.TestCase):
         self.assertNotIn("modello", result.stdout.lower())
         self.assertNotIn("motore", result.stdout.lower())
 
+    def test_serve_help_includes_allowed_host(self):
+        result = self.run_cli("serve", "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--allowed-host", result.stdout)
+
     def test_info_status_is_english(self):
         with tempfile.TemporaryDirectory() as model:
             result = self.run_cli("info", "--model", model)

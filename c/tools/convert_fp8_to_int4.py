@@ -324,6 +324,27 @@ def convert_shard(path, out_dict, n_layers, ebits, io_bits, xbits,
 
 def free_gb(p): return shutil.disk_usage(p).free / 1e9
 
+def _shard_already_done(done, key, outdir):
+    # Mirror of the --indir resume check: None = never seen, "" = seen/empty, name = emitted.
+    prev = done.get(key)
+    return prev is not None and (prev == "" or os.path.exists(os.path.join(outdir, prev)))
+
+def _init_worker(proj_bits):
+    # Restore per-projection expert-bit overrides in each worker: the "spawn" start method
+    # (macOS default) re-imports this module fresh, losing the PROJ_BITS main() populated.
+    global PROJ_BITS
+    PROJ_BITS = proj_bits
+
+def _convert_one(args):
+    # Convert one shard in a worker; the main process writes the result, so shard numbering
+    # and the atomic manifest stay serial and identical to --workers 1.
+    i, sp, n_layers, ebits, io_bits, xbits, keep_mtp, keep_idx, group_size, bits_map = args
+    out = {}
+    convert_shard(sp, out, n_layers, ebits, io_bits, xbits,
+                  keep_mtp=keep_mtp, keep_idx=keep_idx,
+                  group_size=group_size, bits_map=bits_map)
+    return i, out
+
 def check_or_record_params(outdir, prefix, params):
     """#383-class guard, mirrored onto the --repo download loops from the --indir
     path's resume manifest (below): a resumed run with DIFFERENT conversion
@@ -392,6 +413,12 @@ def main():
         help="bits for down_proj in routed experts. Default=xbits")
     ap.add_argument("--n-layers", type=int, default=78)
     ap.add_argument("--min-free-gb", type=float, default=20.0)
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Parallel worker processes for the local --indir conversion "
+                         "(default 1 = serial, unchanged). >1 converts already-local shards "
+                         "concurrently; the main process still writes and checkpoints in "
+                         "shard order, so output and out-NNNNN numbering are identical. "
+                         "No effect on the --repo disk-safe path.")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--selftest-nvfp4", action="store_true",
         help="unit-test del dequant NVFP4 (LUT e2m1 + round-trip), nessun download / no network")
@@ -589,6 +616,18 @@ def main():
         n = 0; fresh = 0; skipped = 0
         import time as _t
         t_start = _t.time()
+        # --workers > 1: shards are already local, so convert them concurrently. Writing and
+        # the manifest stay in THIS process, walked in shard order, so output bytes and the
+        # out-NNNNN numbering match the serial path exactly. workers == 1 = original path.
+        _pool = _result_it = None
+        if a.workers and a.workers > 1:
+            from multiprocessing import Pool
+            _pending = [(i, sp, a.n_layers, a.ebits, a.io_bits, a.xbits,
+                         a.mtp, a.indexer, a.group_size, bits_map)
+                        for i, sp in enumerate(shards)
+                        if not _shard_already_done(done, os.path.basename(sp), a.outdir)]
+            _pool = Pool(a.workers, initializer=_init_worker, initargs=(dict(PROJ_BITS),))
+            _result_it = iter(_pool.imap(_convert_one, _pending))
         for i, sp in enumerate(shards):
             key = os.path.basename(sp)
             prev = done.get(key)                          # None = mai visto; "" = visto, vuoto; nome = emesso
@@ -604,10 +643,13 @@ def main():
                 per = (_t.time() - t_start) / fresh
                 eta = f", ETA {per * (len(shards) - i) / 3600:.1f} h"
             print(f"[{i + 1}/{len(shards)}] {key} ({free_gb(a.outdir):.0f} GB free{eta})", flush=True)
-            out = {}
-            convert_shard(sp, out, a.n_layers, a.ebits, a.io_bits, a.xbits,
-                          keep_mtp=a.mtp, keep_idx=a.indexer,
-                          group_size=a.group_size, bits_map=bits_map)
+            if _result_it is not None:
+                _ri, out = next(_result_it)               # parallel: converted by a worker, in shard order
+            else:
+                out = {}
+                convert_shard(sp, out, a.n_layers, a.ebits, a.io_bits, a.xbits,
+                              keep_mtp=a.mtp, keep_idx=a.indexer,
+                              group_size=a.group_size, bits_map=bits_map)
             if not out:                                   # shard senza MTP/idx: niente file (come il download path)
                 done[key] = ""
             else:
@@ -617,6 +659,8 @@ def main():
             tmp_prog = prog_path + ".tmp"                 # scrittura atomica: una ripresa non vede mai un manifest mezzo scritto
             with open(tmp_prog, "w") as f: json.dump(prog, f, indent=1)   # EN: atomic write: a resume never sees a half-written manifest
             os.replace(tmp_prog, prog_path)
+        if _pool is not None:
+            _pool.close(); _pool.join()
         if skipped: print(f"[RESUME] {skipped} shard(s) already done in {a.outdir}, skipped")
         # metadati per la conversione principale: gli stessi quattro file del download
         # path — senza tokenizer.json chat/serve non partono. I passaggi mtp/idx vanno

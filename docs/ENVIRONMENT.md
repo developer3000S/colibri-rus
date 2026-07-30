@@ -45,7 +45,9 @@ Format: `VAR` — default — effect.
 | `COLI_NO_OMP_TUNE` | off | **Kill-switch** for the OpenMP hot-thread tuning (`OMP_WAIT_POLICY=active` spin + proc-bind). Set `=1` when the CPU is mostly waiting on the GPU (Metal) so spin doesn't steal the shared power budget. |
 | `COLI_NUMA` | auto in generated plans on multi-socket Linux; otherwise off | `COLI_NUMA=1` selectively interleaves large expert and dense slabs across NUMA nodes via `mbind` (raw syscall, no libnuma). Helps multi-socket hosts (+7–40% expert matmul); silent no-op on single-node or non-Linux. Explicit `COLI_NUMA=0` overrides the generated plan. |
 | `MLOCK` | `-1` (auto: on for macOS) | Wire the streamed expert cache into physical RAM (`mlock`) to dodge the memory compressor. `0` off, `1` force. |
-| `CAP_RAISE` | `1` (on) | Let the engine raise the expert-cache cap above `topk` when RAM allows (bigger batches). `0` fixes the cap. |
+| `CAP` | unset | Expert-cache cap (slots/layer) when no CLI positional was given. Precedence: explicit `--cap`/positional > `CAP` > platform default > historic default (#379). Mainly for direct `./glm` use — `coli` users should prefer `--cap`. |
+| `CAP_RAISE` | `1` (on); `0` on Metal + macOS + fast model volume (#379) | Let the engine raise the expert-cache cap above `topk` when RAM allows (bigger batches). `0` fixes the cap. When the platform-aware Metal cache default engages (F_NOCACHE probe measured the model volume fast), the *default* flips to `0` — auto-raise re-creates the Metal residency churn the minimal cache avoids. An explicit `CAP_RAISE` always wins. |
+| `COLI_SSD_FAST_GBS` | `4.0` | Threshold (GB/s, measured F_NOCACHE, cached in `<model>/.coli_ssd` — see [The `.coli_ssd` probe cache](#the-coli_ssd-probe-cache) below) at or above which the model volume counts as "fast" for the platform-aware Metal cache defaults (#379). |
 | `PREFETCH` | `0` | Prefetch depth for streamed experts. |
 | `COLI_MMAP` | `0` | `mmap` the weights instead of read()-ing into slabs. |
 | `PIN` | unset | Path to a `.coli_usage`/stats file; pins the hottest experts into a resident "hot store" at startup. **`PIN=auto`** seeds from the model dir's live `.coli_usage` (appended after every turn, so each restart's pin placement follows the accumulated real workload) with `stats.txt` as the fallback for a virgin model dir; neither present → no pin this run. |
@@ -75,6 +77,52 @@ Format: `VAR` — default — effect.
 | `I4S` | unset | Engage the int4 `IDOT` kernel only for batch `S>=<n>` (testing). |
 | `SPEC_PIN` | `1` (on) | Speculation gate mode. `0` reverts to the legacy S-dependent speculation gates (#163). |
 | `COLI_RAM_OVERCOMMIT` | off | `=1` overrides the "projected peak > MemAvailable → exit(2)" guard so a run that risks kernel OOM-kill is allowed to proceed. |
+
+## The `.coli_ssd` probe cache
+
+On Metal + macOS the engine's first startup measures the model volume with an
+honest F_NOCACHE random-read probe (#379) and caches the result in
+`<model>/.coli_ssd`, so every later startup reads a file instead of
+re-measuring. Details that matter when you meet this file in the wild:
+
+- **Cold-range steering.** `F_NOCACHE` bypasses the page cache only for pages
+  that are not already resident, so probing a freshly-read (warm) shard would
+  measure RAM, not the disk. The probe snapshots residency with `mincore` and
+  reads only 4 MB windows that are entirely cold.
+- **Contamination veto.** If the shard offers fewer than 64 MB of such cold
+  windows, the measurement is refused: nothing is cached, one stderr line
+  explains the deferral, the conservative (slow-storage) defaults hold, and
+  the probe simply retries on the next, colder, startup. The same veto (with
+  its own honest message) fires for an under-allocated shard — a sparse or
+  still-downloading file whose "cold" pages are holes that would measure as
+  RAM-speed zero-fill — and for a shard too small to ever offer 64 MB of
+  probe windows. The probe measures the largest `.safetensors` in the dir.
+- **Format (v2).** One line, `v2 <gbs> <st_dev>` — the measured GB/s and the
+  `st_dev` of the model dir's volume at measurement time. The grammar is
+  strict (plain digits, `0 < gbs < 1000`; no inf/nan/hex/exponents) and both
+  readers — the C engine and `coli doctor`/`coli plan` — accept exactly the
+  same bytes; anything else is ignored and re-probed, never trusted.
+- **Volume identity (best-effort).** The cache is honored only while its
+  recorded `st_dev` matches the model dir's current volume, so copying or
+  rsyncing the model dir (including this hidden file) to another drive
+  normally triggers a re-probe there instead of inheriting the old drive's
+  number; doctor/plan likewise stop showing the stale value. This is
+  best-effort, not an identity guarantee: macOS recycles `st_dev` values, so
+  a cache carried to an external volume that happens to be assigned the old
+  device id (e.g. drives attached one after another in the same slot) will be
+  wrongly trusted until deleted. When in doubt after moving a model dir,
+  delete `.coli_ssd`. True volume-UUID identity is a named follow-up.
+- **Legacy upgrade.** A pre-v2 bare-number cache (written before steering
+  existed, so possibly warm-contaminated) is re-measured once on the next
+  startup and rewritten as v2.
+- **Deleting the file is always safe** — the only cost is one ~0.35 s re-probe.
+- **Split/mirror layouts:** the probe measures the **primary** model dir only
+  (`COLI_MODEL`), and its verdict sets the cache defaults for the whole run.
+  With `COLI_MODEL_DIRS`/`COLI_MODEL_MIRROR` spreading shards across drives of
+  different speeds, that single-drive verdict is an approximation; revisit if
+  mixed-speed split setups become common (the `COLI_DISK_WEIGHTS` startup
+  probe already measures every drive, but feeds the split ratio, not the
+  cache defaults).
 
 ---
 

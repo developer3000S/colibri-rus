@@ -34,6 +34,8 @@ c/tests/test_*
 !c/tests/test_*.mm
 !c/tests/test_*.py
 result
+c/tests/test_cap_precedence
+c/tests/test_cap_precedence.exe
 
 # oracoli tiny generati (make_glm_oracle.py) e dati benchmark scaricati
 c/glm_tiny/

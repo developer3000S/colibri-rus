@@ -109,7 +109,7 @@ def main():
     ap.add_argument("--tasks", default="smoke")
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--ram", type=int, default=0)
-    ap.add_argument("--cap", type=int, default=64)
+    ap.add_argument("--cap", type=int, default=64)  # pinned deliberately: benchmarks need a fixed cache size for reproducibility, not the platform-aware auto (#379)
     ap.add_argument("--bits", default="")
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--dry", action="store_true", help="build requests and stop without running the engine")

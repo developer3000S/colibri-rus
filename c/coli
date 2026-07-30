@@ -606,7 +606,7 @@ def cmd_run(a):
     # <think> open so the engine emits its reasoning block; the default stays nothink.
     tk="<think>" if os.environ.get("THINK","0")=="1" else "<think></think>"
     e=env_for(a); e["PROMPT"]=f"[gMASK]<sop><|user|>{prompt}<|assistant|>{tk}"
-    sys.exit(subprocess.call([GLM, str(a.cap)], env=e))
+    sys.exit(subprocess.call([GLM, str(a.cap if a.cap is not None else 0)], env=e))
 
 def server_probe(base, api_key=None, timeout=1.5):
     """Is a coli serve alive at `base`? Returns its model_id, or None.
@@ -740,9 +740,15 @@ def cmd_chat(a):
         model_id="kimi-k3-colibri" if arch=="kimi" else "inkling-colibri"
         banner(f"chat · {model_id} · local server")
         import openai_server
+        # --cap rides along so an explicit `coli chat --cap N` reaches the
+        # engine (it was silently eaten for years -- disclosed behavior
+        # change); absent stays absent, and openai_server translates the
+        # missing flag per model arch (cap_for_arch, #379: non-glm gets the
+        # legacy 8, an explicit value -- 0 included -- passes verbatim).
         cmd=[sys.executable,openai_server.__file__,"--model",a.model,
              "--engine",engine,"--arch",arch,"--model-id",model_id,
              "--host","127.0.0.1","--port","8000","--max-tokens",str(a.ngen)]
+        if a.cap is not None: cmd+=["--cap",str(a.cap)]
         if a.api_key: cmd+=["--api-key",a.api_key]
         p=subprocess.Popen(cmd,env=env_for_engine(a,arch))
         try:
@@ -775,7 +781,7 @@ def cmd_chat(a):
     # once the READY sentinel arrives, so the status-line display below works
     # exactly as before. (Do NOT add a concurrent stderr drain thread: on
     # Windows, reading two child pipes simultaneously deadlocks CPython's IO.)
-    p=subprocess.Popen([GLM,str(a.cap)], env=e, stdin=subprocess.PIPE,
+    p=subprocess.Popen([GLM,str(a.cap if a.cap is not None else 0)], env=e, stdin=subprocess.PIPE,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
     sp=Spinner("waking the giant (744B)…"); sp.start()
     st=stream_turn(p, READY, lambda b: None)
@@ -1050,7 +1056,13 @@ def main():
                         default=os.environ.get("COLI_POLICY","quality"),
                         help="resource policy (explicit --topk/--topp overrides warn and proceed)")
     common.add_argument("--repin", type=int, default=0, help="adapt RAM/VRAM experts every N tokens")
-    common.add_argument("--cap", type=int, default=8); common.add_argument("--ngen", type=int, default=1024)  # rete di sicurezza: la fine vera la decidono gli stop token
+    # Absent (None) = not explicitly set: the glm engine gets the 0 sentinel and picks
+    # (8 historically; 1 on Metal+darwin+fast SSD, #379 -- an honest F_NOCACHE probe
+    # measures "fast", cached in <model>/.coli_ssd), while non-glm arches get the
+    # legacy 8 (openai_server.cap_for_arch). An explicit --cap N -- 0 included --
+    # reaches the engine verbatim; see colibri.c's coli_resolve_cap().
+    common.add_argument("--cap", type=int, default=None, help="cache slots/layer (default: auto)")
+    common.add_argument("--ngen", type=int, default=1024)  # rete di sicurezza: la fine vera la decidono gli stop token
     common.add_argument("--topp", type=float, default=0); common.add_argument("--topk", type=int, default=0)
     common.add_argument("--temp", type=float, default=None)  # temperatura token (0=greedy, default 1.0+nucleus .95)
     ap=argparse.ArgumentParser(prog="coli", parents=[common], description="colibri — run GLM-5.2 locally")

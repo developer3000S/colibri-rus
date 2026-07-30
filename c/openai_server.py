@@ -1151,13 +1151,60 @@ def read_engine_turn(stream, sentinel, on_bytes):
     }
 
 
+def model_arch(model):
+    """The model's engine family from its config.json model_type -- the same
+    rule as coli's model_arch(): "inkling"/"kimi" substring, everything else
+    (including an unreadable config) is glm."""
+    try:
+        with open(Path(model) / "config.json", encoding="utf-8") as fh:
+            model_type = (json.load(fh).get("model_type") or "").lower()
+    except (OSError, ValueError, TypeError):
+        return "glm"
+    if "inkling" in model_type:
+        return "inkling"
+    if "kimi" in model_type:
+        return "kimi"
+    return "glm"
+
+
+def cap_for_arch(arch, cap):
+    """Cap-sentinel shim (#379): CURRENT-STATE CALIBRATION, not durable core.
+
+    An absent cap (None) means different things across today's engines --
+    platform-auto in colibri.c (coli_resolve_cap resolves the 0 sentinel
+    Metal/darwin/SSD-aware), RAM-auto in inkling.c (cap <= 0 fits the expert
+    LRU to available RAM), while the coli wrapper historically forced 8 on
+    every engine. This shim INTERNALIZES that external inconsistency at the
+    one funnel every engine launch passes through: with no explicit cap, a
+    glm-arch model's engine receives the 0 sentinel to resolve platform-aware
+    and a non-glm arch receives the legacy 8. An EXPLICIT cap passes through
+    verbatim to any engine -- including an explicit 0, which for inkling means
+    upstream's RAM-auto (people who ask for upstream semantics get them).
+    Keyed on the MODEL's arch (config.json model_type), not the engine
+    binary's file name: COLI_ENGINE users package the glm engine under
+    arbitrary names (glm52, colibri-1.2, ...), and basename keying silently
+    disabled the platform default for exactly them.
+
+    MOOTING TRIGGER: upstream unifies cap-sentinel semantics across engines
+    -> this shim must be removed and re-derived."""
+    if cap is not None:
+        return cap
+    return 0 if arch == "glm" else 8
+
+
 class Engine:
-    def __init__(self, executable, model, cap=8, max_tokens=1024, env=None, kv_slots=1):
+    # cap=None = "not explicitly set": a glm-arch model's engine resolves the
+    # 0 sentinel (8 historically, 1 on Metal+darwin+fast SSD -- colibri.c
+    # coli_resolve_cap, #379), non-glm arches get the legacy 8, via
+    # cap_for_arch above. Same convention as the --cap flags in coli and
+    # main() below, so programmatic callers that never pass cap get the same
+    # auto behavior as the CLI; an explicit int (0 included) is verbatim.
+    def __init__(self, executable, model, cap=None, max_tokens=1024, env=None, kv_slots=1):
         child_env = dict(env or os.environ, SNAP=str(model), SERVE="1", SERVE_BATCH="1",
                          NGEN=str(max_tokens), KV_SLOTS=str(kv_slots))
         self.process = subprocess.Popen(
-            [str(executable), str(cap)], env=child_env, stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, bufsize=0,
+            [str(executable), str(cap_for_arch(model_arch(model), cap))], env=child_env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0,
         )
         self.write_lock = threading.Lock()
         self.pending_lock = threading.Lock()
@@ -2290,7 +2337,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
 
 def serve(model, host="127.0.0.1", port=8000, model_id="glm-5.2-colibri", api_key=None,
-          cap=8, max_tokens=1024, engine=None, env=None, cors_origins=None,
+          cap=None, max_tokens=1024, engine=None, env=None, cors_origins=None,
           max_queue=8, queue_timeout=300, kv_slots=1, allowed_hosts=()):
     if engine is None:
         engine = default_engine()
@@ -2349,7 +2396,10 @@ def main():
     parser.add_argument("--api-key", default=os.environ.get("COLI_API_KEY"))
     parser.add_argument("--cors-origin", action="append", default=None,
                         help="allowed browser origin; repeat as needed (use '*' for any origin)")
-    parser.add_argument("--cap", type=int, default=8)
+    # Absent = not explicitly set: mirrors coli's --cap (see cap_for_arch and issue
+    # #379 -- glm arch resolves platform-aware, non-glm gets the legacy 8). An
+    # explicit value, 0 included, reaches the engine verbatim.
+    parser.add_argument("--cap", type=int, default=None, help="cache slots/layer (default: auto)")
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--max-queue", type=int, default=int(os.environ.get("COLI_MAX_QUEUE", "8")))
     parser.add_argument("--queue-timeout", type=float,
@@ -2364,13 +2414,7 @@ def main():
     global ARCH
     ARCH = args.arch
     if ARCH == "auto":
-        try:
-            with open(Path(args.model) / "config.json") as fh:
-                model_type = (json.load(fh).get("model_type") or "").lower()
-                ARCH = ("inkling" if "inkling" in model_type else
-                        "kimi" if "kimi" in model_type else "glm")
-        except OSError:
-            ARCH = "glm"
+        ARCH = model_arch(args.model)
     if args.model_id is None:
         args.model_id = ("inkling-colibri" if ARCH == "inkling" else
                          "kimi-k3-colibri" if ARCH == "kimi" else "glm-5.2-colibri")

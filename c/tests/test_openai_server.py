@@ -14,8 +14,8 @@ from pathlib import Path
 from openai_server import (APIError, APIHandler, APIServer, ClientCancelled,
                            DEFAULT_CHAT_STOP_SEQUENCES, END, GenerationScheduler,
                            READY, Engine, InklingStreamSplit, StopFilter, ThinkingStreamSplit,
-                           _engine_error, conversation_cache_slot, generation_options,
-                           parse_tool_calls, read_engine_turn,
+                           _engine_error, cap_for_arch, conversation_cache_slot, model_arch,
+                           generation_options, parse_tool_calls, read_engine_turn,
                            render_chat, render_chat_kimi, serve,
                            split_thinking_reply, stop_policy)
 
@@ -590,6 +590,84 @@ class DispatcherTest(unittest.TestCase):
         self.assertEqual(output, ["x"])
         self.assertEqual(stats["completion_tokens"], 1)
         self.assertEqual(process.writes[-1].split(), [b"STOP", request_id])
+
+
+class CapSentinelShimTest(unittest.TestCase):
+    # #379 cap-sentinel shim, arch-keyed (#386 r2, F3): an absent cap is
+    # "platform-auto" only for the glm engine (colibri.c coli_resolve_cap);
+    # inkling reads cap <= 0 as "fit the expert LRU to all available RAM"
+    # (inkling.c), so leaking the sentinel to a non-glm arch silently changes
+    # its memory behavior. The key is the MODEL's config.json model_type, not
+    # the engine binary's file name -- COLI_ENGINE users package the glm
+    # engine as glm52/colibri-1.2/glm-metal, and basename keying disabled the
+    # platform default for exactly them (and an inkling binary someone names
+    # `glm` would get the leak back). Engine() is the one funnel every launch
+    # passes through, so the translation is pinned at the argv it emits, over
+    # the full matrix: arch x arbitrary executable name x cap absent/explicit.
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _model(self, model_type):
+        model = Path(self.tmp.name) / f"model-{model_type}"
+        model.mkdir(exist_ok=True)
+        (model / "config.json").write_text(json.dumps({"model_type": model_type}))
+        return str(model)
+
+    def _spawn_argv(self, executable, model, **kwargs):
+        process = FakeProcess(lambda _process, _frame: None)
+        with patch("openai_server.subprocess.Popen", return_value=process) as popen:
+            engine = Engine(executable, model, **kwargs)
+            engine.close()
+        return popen.call_args[0][0]
+
+    def test_matrix_arch_times_engine_name_times_cap(self):
+        # COLI_ENGINE axis: the executable name carries no information; only
+        # the model arch and the explicitness of cap may matter.
+        executables = ("colibri", "glm", "glm52", "colibri-1.2", "glm-metal",
+                       "/opt/custom/inkling", "kimi_k3.exe")
+        cases = (  # (model_type, cap kwargs, expected argv cap)
+            ("glm_moe_dsa", {}, "0"),          # absent -> glm sentinel
+            ("inkling", {}, "8"),              # absent -> legacy 8
+            ("kimi_k3", {}, "8"),              # absent -> legacy 8
+            ("glm_moe_dsa", {"cap": 5}, "5"),  # explicit -> verbatim
+            ("inkling", {"cap": 5}, "5"),
+            ("kimi_k3", {"cap": 5}, "5"),
+            ("glm_moe_dsa", {"cap": 0}, "0"),  # explicit 0 -> verbatim
+            ("inkling", {"cap": 0}, "0"),      # upstream RAM-auto, by request
+            ("kimi_k3", {"cap": 0}, "0"),
+        )
+        for model_type, kwargs, want in cases:
+            model = self._model(model_type)
+            for executable in executables:
+                self.assertEqual(
+                    self._spawn_argv(executable, model, **kwargs),
+                    [executable, want],
+                    f"arch={model_type} exe={executable} kwargs={kwargs}")
+
+    def test_missing_or_unreadable_config_is_glm(self):
+        # historic default: anything that cannot be classified is glm
+        self.assertEqual(self._spawn_argv("engine", "/nonexistent/model"),
+                         ["engine", "0"])
+        model = Path(self.tmp.name) / "model-broken"
+        model.mkdir()
+        (model / "config.json").write_text("{not json")
+        self.assertEqual(self._spawn_argv("engine", str(model)), ["engine", "0"])
+
+    def test_cap_for_arch_is_the_single_translation_point(self):
+        self.assertEqual(cap_for_arch("glm", None), 0)
+        self.assertEqual(cap_for_arch("inkling", None), 8)
+        self.assertEqual(cap_for_arch("kimi", None), 8)
+        self.assertEqual(cap_for_arch("glm", 3), 3)
+        self.assertEqual(cap_for_arch("inkling", 3), 3)
+        self.assertEqual(cap_for_arch("inkling", 0), 0)   # explicit 0 is explicit
+        self.assertEqual(cap_for_arch("glm", 0), 0)
+
+    def test_model_arch_reads_model_type(self):
+        self.assertEqual(model_arch(self._model("glm_moe_dsa")), "glm")
+        self.assertEqual(model_arch(self._model("inkling")), "inkling")
+        self.assertEqual(model_arch(self._model("kimi_k3")), "kimi")
+        self.assertEqual(model_arch("/nonexistent"), "glm")
 
 
 class HTTPTest(unittest.TestCase):

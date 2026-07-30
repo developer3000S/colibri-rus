@@ -86,6 +86,11 @@ decaying session heat map replaces cold pinned experts with hotter streamed
 experts. A 25% hysteresis and a four-swap limit prevent tier thrashing.
 Persistent `.coli_usage` remains the long-term signal and is not decayed.
 
+The history's on-disk format, what happens when one engine is handed another
+engine's history, and how `PIN=<file>` differs from `PIN=auto` in how much it
+trusts a file are documented in
+[routing-telemetry.md](routing-telemetry.md).
+
 ## Router-lookahead prefetch (`PILOT=1`, experimental)
 
 GLM-5.2's expert routing is measurably predictable *ahead of time* — applying

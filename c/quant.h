@@ -402,6 +402,114 @@ static void matmul_i3(float *y, const float *x, const uint8_t *q3, const float *
     }
 }
 
+/* ---- fmt=8: native FP8-e4m3 passthrough (Z.ai GLM-5.2-FP8 read path) ------
+ * PUBLIC ordinal. This format was minted fmt=6 during original development,
+ * then re-tagged fmt=100 (PRIVATE ORDINAL BLOCK, see colibri.c's QT struct
+ * comment) after #465 (E8/IQ3, above) claimed ordinal 6 upstream out from
+ * under it; graduated to fmt=7 when the maintainer assigned that ordinal on
+ * #524; renumbered a second time to fmt=8 after #705 merged into dev claiming
+ * fmt=7 for MXFP4 (Kimi K3 Vulkan tier, backend_vulkan.c) while this PR was
+ * still open. Both renumbers were pure retags, per the private-block
+ * convention's own "find-and-replace, zero on-disk impact" promise: nothing
+ * on disk carries the ordinal. See qt_resolve_fmt in colibri.c ("THE DESIGN
+ * LANDMINE") for the disambiguation this needs against BOTH fmt=1 (int8) and
+ * fmt=6 (E8/IQ3).
+ *
+ * fmt=8 weight bytes are O*I raw e4m3 bytes -- byte-identical to int8 (fmt=1).
+ * What makes this a DIFFERENT format is the scale: one f32 per 128x128 BLOCK of
+ * the [O,I] weight matrix (shape [ceil(O/128),ceil(I/128)]), not one f32 per
+ * output row. Dequant is w[o,i] = e4m3_decode(byte) * scale[o/128, i/128]
+ * (MULTIPLY, not divide) -- mirrors tools/convert_fp8_to_int4.py's dequant()
+ * exactly, which is the authoritative reference for how Z.ai's checkpoints read
+ * on the source side. This f32 encoding is a declared PROPERTY of the format,
+ * not the only one it can carry -- DeepSeek-V4 ships this identical weight
+ * geometry with UE8M0 (1-byte, power-of-two) block scales instead; qt_resolve_fmt
+ * recognizes that byte signature and refuses it BY NAME rather than
+ * misreading it as f32 (UE8M0 decode itself is not implemented in this build).
+ *
+ * 256-entry decode LUT, cross-checked byte-for-byte against PyTorch's
+ * torch.float8_e4m3fn (the exact dtype safetensors reports for these shards):
+ * sign(1) exp(4,bias=7) mant(3), subnormal at exp==0, and the OCP E4M3-FN
+ * convention that exp==0xF is NOT reserved for infinity -- only mant==0x7 at
+ * exp==0xF is NaN (max finite is exp=0xF,mant=0x6 -> 448). A static compile-time
+ * table (not a lazily-initialized one) is used deliberately: matmul_fp8 below
+ * runs inside #pragma omp parallel for, and a lazy-init global would race under
+ * concurrent first use.
+ *
+ * NaN POLICY (decided, documented per the build spec): a NaN byte (0x7F/0xFF)
+ * decodes to a real IEEE NaN and is left to propagate through the dot product,
+ * exactly like any other source of a NaN weight (fmt=0/f32 tensors are never
+ * scrubbed either). The engine already has a dedicated, TESTED safety net for
+ * NaN reaching the sampler (argmax_v/dist_build, see tests/test_logit_nan.c:
+ * "degrade + diagnose, never silently corrupt") -- fmt=8 relies on that existing
+ * downstream net rather than adding a second, redundant weight-level scrub. */
+static const float E4M3_LUT[256] = {
+    0x0.0p+0f,0x1.0000000000000p-9f,0x1.0000000000000p-8f,0x1.8000000000000p-8f,0x1.0000000000000p-7f,0x1.4000000000000p-7f,0x1.8000000000000p-7f,0x1.c000000000000p-7f,
+    0x1.0000000000000p-6f,0x1.2000000000000p-6f,0x1.4000000000000p-6f,0x1.6000000000000p-6f,0x1.8000000000000p-6f,0x1.a000000000000p-6f,0x1.c000000000000p-6f,0x1.e000000000000p-6f,
+    0x1.0000000000000p-5f,0x1.2000000000000p-5f,0x1.4000000000000p-5f,0x1.6000000000000p-5f,0x1.8000000000000p-5f,0x1.a000000000000p-5f,0x1.c000000000000p-5f,0x1.e000000000000p-5f,
+    0x1.0000000000000p-4f,0x1.2000000000000p-4f,0x1.4000000000000p-4f,0x1.6000000000000p-4f,0x1.8000000000000p-4f,0x1.a000000000000p-4f,0x1.c000000000000p-4f,0x1.e000000000000p-4f,
+    0x1.0000000000000p-3f,0x1.2000000000000p-3f,0x1.4000000000000p-3f,0x1.6000000000000p-3f,0x1.8000000000000p-3f,0x1.a000000000000p-3f,0x1.c000000000000p-3f,0x1.e000000000000p-3f,
+    0x1.0000000000000p-2f,0x1.2000000000000p-2f,0x1.4000000000000p-2f,0x1.6000000000000p-2f,0x1.8000000000000p-2f,0x1.a000000000000p-2f,0x1.c000000000000p-2f,0x1.e000000000000p-2f,
+    0x1.0000000000000p-1f,0x1.2000000000000p-1f,0x1.4000000000000p-1f,0x1.6000000000000p-1f,0x1.8000000000000p-1f,0x1.a000000000000p-1f,0x1.c000000000000p-1f,0x1.e000000000000p-1f,
+    0x1.0000000000000p+0f,0x1.2000000000000p+0f,0x1.4000000000000p+0f,0x1.6000000000000p+0f,0x1.8000000000000p+0f,0x1.a000000000000p+0f,0x1.c000000000000p+0f,0x1.e000000000000p+0f,
+    0x1.0000000000000p+1f,0x1.2000000000000p+1f,0x1.4000000000000p+1f,0x1.6000000000000p+1f,0x1.8000000000000p+1f,0x1.a000000000000p+1f,0x1.c000000000000p+1f,0x1.e000000000000p+1f,
+    0x1.0000000000000p+2f,0x1.2000000000000p+2f,0x1.4000000000000p+2f,0x1.6000000000000p+2f,0x1.8000000000000p+2f,0x1.a000000000000p+2f,0x1.c000000000000p+2f,0x1.e000000000000p+2f,
+    0x1.0000000000000p+3f,0x1.2000000000000p+3f,0x1.4000000000000p+3f,0x1.6000000000000p+3f,0x1.8000000000000p+3f,0x1.a000000000000p+3f,0x1.c000000000000p+3f,0x1.e000000000000p+3f,
+    0x1.0000000000000p+4f,0x1.2000000000000p+4f,0x1.4000000000000p+4f,0x1.6000000000000p+4f,0x1.8000000000000p+4f,0x1.a000000000000p+4f,0x1.c000000000000p+4f,0x1.e000000000000p+4f,
+    0x1.0000000000000p+5f,0x1.2000000000000p+5f,0x1.4000000000000p+5f,0x1.6000000000000p+5f,0x1.8000000000000p+5f,0x1.a000000000000p+5f,0x1.c000000000000p+5f,0x1.e000000000000p+5f,
+    0x1.0000000000000p+6f,0x1.2000000000000p+6f,0x1.4000000000000p+6f,0x1.6000000000000p+6f,0x1.8000000000000p+6f,0x1.a000000000000p+6f,0x1.c000000000000p+6f,0x1.e000000000000p+6f,
+    0x1.0000000000000p+7f,0x1.2000000000000p+7f,0x1.4000000000000p+7f,0x1.6000000000000p+7f,0x1.8000000000000p+7f,0x1.a000000000000p+7f,0x1.c000000000000p+7f,0x1.e000000000000p+7f,
+    0x1.0000000000000p+8f,0x1.2000000000000p+8f,0x1.4000000000000p+8f,0x1.6000000000000p+8f,0x1.8000000000000p+8f,0x1.a000000000000p+8f,0x1.c000000000000p+8f,       NAN,
+     -0x0.0p+0f,-0x1.0000000000000p-9f,-0x1.0000000000000p-8f,-0x1.8000000000000p-8f,-0x1.0000000000000p-7f,-0x1.4000000000000p-7f,-0x1.8000000000000p-7f,-0x1.c000000000000p-7f,
+    -0x1.0000000000000p-6f,-0x1.2000000000000p-6f,-0x1.4000000000000p-6f,-0x1.6000000000000p-6f,-0x1.8000000000000p-6f,-0x1.a000000000000p-6f,-0x1.c000000000000p-6f,-0x1.e000000000000p-6f,
+    -0x1.0000000000000p-5f,-0x1.2000000000000p-5f,-0x1.4000000000000p-5f,-0x1.6000000000000p-5f,-0x1.8000000000000p-5f,-0x1.a000000000000p-5f,-0x1.c000000000000p-5f,-0x1.e000000000000p-5f,
+    -0x1.0000000000000p-4f,-0x1.2000000000000p-4f,-0x1.4000000000000p-4f,-0x1.6000000000000p-4f,-0x1.8000000000000p-4f,-0x1.a000000000000p-4f,-0x1.c000000000000p-4f,-0x1.e000000000000p-4f,
+    -0x1.0000000000000p-3f,-0x1.2000000000000p-3f,-0x1.4000000000000p-3f,-0x1.6000000000000p-3f,-0x1.8000000000000p-3f,-0x1.a000000000000p-3f,-0x1.c000000000000p-3f,-0x1.e000000000000p-3f,
+    -0x1.0000000000000p-2f,-0x1.2000000000000p-2f,-0x1.4000000000000p-2f,-0x1.6000000000000p-2f,-0x1.8000000000000p-2f,-0x1.a000000000000p-2f,-0x1.c000000000000p-2f,-0x1.e000000000000p-2f,
+    -0x1.0000000000000p-1f,-0x1.2000000000000p-1f,-0x1.4000000000000p-1f,-0x1.6000000000000p-1f,-0x1.8000000000000p-1f,-0x1.a000000000000p-1f,-0x1.c000000000000p-1f,-0x1.e000000000000p-1f,
+    -0x1.0000000000000p+0f,-0x1.2000000000000p+0f,-0x1.4000000000000p+0f,-0x1.6000000000000p+0f,-0x1.8000000000000p+0f,-0x1.a000000000000p+0f,-0x1.c000000000000p+0f,-0x1.e000000000000p+0f,
+    -0x1.0000000000000p+1f,-0x1.2000000000000p+1f,-0x1.4000000000000p+1f,-0x1.6000000000000p+1f,-0x1.8000000000000p+1f,-0x1.a000000000000p+1f,-0x1.c000000000000p+1f,-0x1.e000000000000p+1f,
+    -0x1.0000000000000p+2f,-0x1.2000000000000p+2f,-0x1.4000000000000p+2f,-0x1.6000000000000p+2f,-0x1.8000000000000p+2f,-0x1.a000000000000p+2f,-0x1.c000000000000p+2f,-0x1.e000000000000p+2f,
+    -0x1.0000000000000p+3f,-0x1.2000000000000p+3f,-0x1.4000000000000p+3f,-0x1.6000000000000p+3f,-0x1.8000000000000p+3f,-0x1.a000000000000p+3f,-0x1.c000000000000p+3f,-0x1.e000000000000p+3f,
+    -0x1.0000000000000p+4f,-0x1.2000000000000p+4f,-0x1.4000000000000p+4f,-0x1.6000000000000p+4f,-0x1.8000000000000p+4f,-0x1.a000000000000p+4f,-0x1.c000000000000p+4f,-0x1.e000000000000p+4f,
+    -0x1.0000000000000p+5f,-0x1.2000000000000p+5f,-0x1.4000000000000p+5f,-0x1.6000000000000p+5f,-0x1.8000000000000p+5f,-0x1.a000000000000p+5f,-0x1.c000000000000p+5f,-0x1.e000000000000p+5f,
+    -0x1.0000000000000p+6f,-0x1.2000000000000p+6f,-0x1.4000000000000p+6f,-0x1.6000000000000p+6f,-0x1.8000000000000p+6f,-0x1.a000000000000p+6f,-0x1.c000000000000p+6f,-0x1.e000000000000p+6f,
+    -0x1.0000000000000p+7f,-0x1.2000000000000p+7f,-0x1.4000000000000p+7f,-0x1.6000000000000p+7f,-0x1.8000000000000p+7f,-0x1.a000000000000p+7f,-0x1.c000000000000p+7f,-0x1.e000000000000p+7f,
+    -0x1.0000000000000p+8f,-0x1.2000000000000p+8f,-0x1.4000000000000p+8f,-0x1.6000000000000p+8f,-0x1.8000000000000p+8f,-0x1.a000000000000p+8f,-0x1.c000000000000p+8f,       NAN,
+};
+static inline float e4m3_decode(uint8_t b){ return E4M3_LUT[b]; }
+
+#define FP8_BLOCK 128
+static inline int64_t fp8_nblk(int n){ return ((int64_t)n + FP8_BLOCK - 1) / FP8_BLOCK; }
+
+/* y[S,O] = x[S,I] @ W^T, W raw e4m3 bytes (byte-identical layout to fmt=1) +
+ * per-128x128-BLOCK f32 scale [ceil(O/128),ceil(I/128)]. Scalar reference path
+ * (no SIMD in v1 -- BW-bound like the Metal kernel, and this format's hot path
+ * is the GPU one; a vectorized CPU kernel is future work if measured needed).
+ * Mirrors matmul_i3's double-accumulate-across-groups / float-within-group
+ * convention so cross-block cancellation doesn't cost precision unfairly. */
+static void matmul_fp8(float *y, const float *x, const uint8_t *q8, const float *bscale,
+                       int S, int I, int O){
+    int64_t nblkI = fp8_nblk(I);
+    #pragma omp parallel for schedule(static)
+    for(int o=0;o<O;o++){
+        const uint8_t *w = q8 + (int64_t)o*I;
+        int64_t blkO = o / FP8_BLOCK;
+        const float *scl = bscale + blkO*nblkI;
+        for(int s=0;s<S;s++){
+            const float *xs = x + (int64_t)s*I;
+            double a=0;
+            for(int64_t bi=0; bi*FP8_BLOCK<I; bi++){
+                int base=(int)(bi*FP8_BLOCK); int blen=FP8_BLOCK; if(base+blen>I) blen=I-base;
+                float sc=scl[bi]; float acc=0;
+                for(int i=base;i<base+blen;i++) acc += e4m3_decode(w[i])*xs[i];
+                a += (double)acc*sc;
+            }
+            y[(int64_t)s*O+o]=(float)a;
+        }
+    }
+}
+
 /* ---- IDOT: integer dot kernels (int8-quantized activations) --------------- */
 #if defined(__AVX512VNNI__) && defined(__AVX512BW__)
 #define IDOT_KERNEL "avx512-vnni"

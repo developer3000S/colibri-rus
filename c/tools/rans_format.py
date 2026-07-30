@@ -20,7 +20,7 @@ FORMAT SUMMARY (docs/int4-rans256-g0.md is the full specification):
     the format NAME "int4-rans256-g0". THE STAMP IS MANDATORY: entropy-coded
     sizes are data-dependent, so no byte-arithmetic inference exists for this
     format — the stamp is the ONLY signal a U8 tensor is entropy-coded, not a
-    cross-check on an inference (unlike fmt=7's optional stamp).
+    cross-check on an inference (unlike fmt=8's optional stamp).
 
 Table construction is the standard largest-remainder frequency quantization
 (FSE/rANS convention): scale an empirical histogram to sum exactly to
@@ -42,7 +42,7 @@ N_STREAMS = 256
 SCALE_BITS = 14                # M = 16384; generous for a 16-symbol alphabet
 M = 1 << SCALE_BITS
 TABLE_ID = "g0"                # shared-global-table generation 0
-METADATA_KEY = "colibri.fmt"   # same key/shape as the fmt=7 stamp convention
+METADATA_KEY = "colibri.fmt"   # same key/shape as the fmt=8 stamp convention
 TABLE_KEY = "colibri.int4-rans256-g0.table"
 RANS_L = 1 << 23
 SLACK = 64                     # readable bytes past a record buffer (SIMD contract)

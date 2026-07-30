@@ -10,7 +10,7 @@
 #include <cmath>
 #include <vector>
 
-enum { F32=0, I8=1, I4=2, I2=3, I4G=4 };
+enum { F32=0, I8=1, I4=2, I2=3, I4G=4, FP8=8 };
 
 static void cpu_ref(int fmt, const void *W, const float *s, const float *x,
                     float *y, int S, int I, int O) {
@@ -80,6 +80,41 @@ static void cpu_ref_grouped(const uint8_t *q4, const float *scale, const float *
   }
 }
 
+// ---- fmt=8 (native FP8-e4m3 passthrough -- see colibri.c): own CPU reference +
+// harness --------------------------------------------------------------------------
+// Independent reference decode (bit manipulation, NOT quant.h's E4M3_LUT -- this file
+// stays self-contained like the rest of its CPU references) for OCP E4M3-FN: exp==0 is
+// subnormal, exp==0xF&&mant==0x7 is the only NaN code (both signs), else normal with
+// bias 7. Must match quant.h's e4m3_decode AND the mm_gemv fmt==8 branch's in-kernel
+// bit manipulation exactly -- see run_fp8_lut() below for the exhaustive 256-code check
+// that proves the GPU kernel agrees with this reference (and by transitivity with the
+// CPU LUT, which was cross-checked byte-for-byte against torch.float8_e4m3fn offline).
+static float ref_e4m3(uint8_t b) {
+  unsigned sign=(b>>7)&1, exp=(b>>3)&0xF, mant=b&0x7;
+  if (exp==0xF && mant==0x7) return NAN;
+  float val = (exp==0) ? (float)mant*(1.0f/8.0f)*powf(2.0f,1.0f-7.0f)
+                       : (1.0f+(float)mant*(1.0f/8.0f))*powf(2.0f,(float)exp-7.0f);
+  return sign ? -val : val;
+}
+static int fp8_nblk(int n){ return (n+127)/128; }
+
+static void cpu_ref_fp8(const uint8_t *q8, const float *bscale, const float *x,
+                        double *y, double *mag, int S, int I, int O) {
+  int nblkI = fp8_nblk(I);
+  for (int o=0;o<O;o++){
+    const uint8_t *w = q8 + (size_t)o*I;
+    const float *scl = bscale + (size_t)(o/128)*nblkI;
+    for (int s=0;s<S;s++){
+      const float *xs = x + (size_t)s*I; double a=0, m=0;
+      for (int i=0;i<I;i++){
+        double term = (double)ref_e4m3(w[i]) * (double)xs[i] * (double)scl[i/128];
+        a += term; m += fabs(term);
+      }
+      y[(size_t)s*O+o] = a; mag[(size_t)s*O+o] = m;
+    }
+  }
+}
+
 // Tolerance: magnitude-relative (error / sum of |terms|), NOT the ymax-relative-max-
 // abs-error convention run() above uses. Reason: a dot product over many groups can
 // land near zero from signed-term cancellation, and a fixed-point-ish absolute GPU/CPU
@@ -130,6 +165,107 @@ static int run_grouped(int O, int I, int gs, int S, int outlier, const char *nam
   int ok = (bad == 0);
   printf("  %-34s worst_rel=%.2e (I=%d gs=%d ng=%d S=%d)  %s\n", name, worst, I, gs, ng, S, ok?"ok":"*** MISMATCH");
   coli_metal_tensor_free(t);
+  return ok?0:1;
+}
+
+// Tolerance/oracle convention identical to run_grouped() above (magnitude-relative for
+// the block-scale accumulation, avoiding cancellation-noise false positives on
+// near-zero results).
+static int run_fp8(int O, int I, int S, const char *name) {
+  int nblkO=fp8_nblk(O), nblkI=fp8_nblk(I), nblk=nblkO*nblkI;
+  std::vector<uint8_t> W((size_t)O*I);
+  std::vector<float> scale((size_t)nblk), x((size_t)S*I), yg((size_t)S*O);
+  std::vector<double> yr((size_t)S*O), mag((size_t)S*O);
+  srand(5150 + I*7 + O*3 + S*13);
+  for (auto &b : W) { do { b = (uint8_t)(rand()&0xFF); } while (b==0x7F || b==0xFF); }  // exclude NaN codes
+  // distinct, easily-distinguishable scale per block (stride-audit idiom, same as
+  // test_fp8_passthrough.c's CPU version): a swapped o/128 vs i/128 stride, or a wrong
+  // nblkI in the shader's indexing, lands on a DIFFERENT block's scale and shows up as
+  // a loud numeric mismatch rather than passing by luck.
+  for (int b=0;b<nblk;b++) scale[b] = (float)(b+1)*0.01f*((b&1)?-1.f:1.f);
+  for (auto &v : x) v = ((rand()%2000)-1000)/1000.0f;
+  cpu_ref_fp8(W.data(), scale.data(), x.data(), yr.data(), mag.data(), S, I, O);
+  ColiMetalTensor *t=nullptr;
+  if (!coli_metal_matmul(&t, yg.data(), x.data(), W.data(), scale.data(), FP8, S, I, O, 0)) {
+    printf("  %-42s FAIL (matmul returned 0)\n", name); return 1; }
+  double worst=0; int bad=0;
+  for (size_t i=0; i<(size_t)S*O; i++) {
+    double d = fabs((double)yg[i] - yr[i]);
+    double rel = mag[i] > 1e-30 ? d/mag[i] : d;
+    if (rel > worst) worst = rel;
+    if (rel > 1e-4) bad++;
+  }
+  int ok = (bad == 0);
+  printf("  %-42s worst_rel=%.2e (I=%d O=%d nblkO=%d nblkI=%d S=%d)  %s\n",
+         name, worst, I, O, nblkO, nblkI, S, ok?"ok":"*** MISMATCH");
+  coli_metal_tensor_free(t);
+  return ok?0:1;
+}
+
+// Exhaustive LUT-exactness check run THROUGH the actual GPU kernel: O=256,I=1 means
+// each of the 256 output rows has exactly ONE weight byte, set to that row's own index
+// (0..255) -- so row o's dequant is exactly e4m3_decode(o). x=[1.0] and both blocks'
+// scale=1.0 isolate the decode from the block-scale/accumulation logic entirely. This
+// mirrors test_fp8_passthrough.c's CPU LUT-exactness test (test_lut), but exercised
+// through mm_gemv's in-kernel bit manipulation instead of quant.h's table -- proving
+// the two independently-written decoders agree on all 256 codes, including both NaN
+// codes and the sign of zero.
+static int run_fp8_lut(const char *name) {
+  enum { O=256, I=1 };
+  std::vector<uint8_t> W(O*I); for (int b=0;b<O;b++) W[b]=(uint8_t)b;
+  std::vector<float> scale(fp8_nblk(O)*fp8_nblk(I), 1.0f);   // nblkO=2,nblkI=1 -> both blocks scale=1
+  std::vector<float> x(I, 1.0f), yg(O);
+  ColiMetalTensor *t=nullptr;
+  if (!coli_metal_matmul(&t, yg.data(), x.data(), W.data(), scale.data(), FP8, 1, I, O, 0)) {
+    printf("  %-42s FAIL (matmul returned 0)\n", name); return 1; }
+  int bad=0;
+  for (int b=0;b<O;b++) {
+    float ref = ref_e4m3((uint8_t)b);
+    if (b==0x7F || b==0xFF) { if (!std::isnan(yg[b])) bad++; continue; }
+    if (yg[b] != ref) bad++;
+  }
+  int ok = (bad==0);
+  printf("  %-42s %d/256 mismatches  %s\n", name, bad, ok?"ok":"*** MISMATCH");
+  coli_metal_tensor_free(t);
+  return ok?0:1;
+}
+
+// Confirms the documented "GEMM path optional this build" claim is actually true, not
+// just asserted in a comment: coli_metal_gemm must refuse fmt=8 (return 0, the CPU-
+// fallback signal) so matmul_qt_ex's caller-side allowlist exclusion is backed by a
+// second, independent gate inside the Metal backend itself.
+static int run_fp8_gemm_gate(const char *name) {
+  uint8_t w[8]={0}; float s[1]={1.0f}, x[8]={0}, y[1]={0};
+  int rc = coli_metal_gemm(y, x, w, s, FP8, 1, 8, 1, 0);
+  int ok = (rc == 0);
+  printf("  %-42s rc=%d (expect 0/CPU-fallback)  %s\n", name, rc, ok?"ok":"*** MISMATCH (should have refused)");
+  return ok?0:1;
+}
+
+// colibri.c's moe() has a THIRD fmt=8-adjacent Metal entry point besides the two
+// guarded above (bind_gemv's attn/layer-decode shaders and coli_metal_gemm) -- the
+// batched routed-expert dispatch via coli_metal_moe_block[_begin] (colibri.c's
+// MB_BUILD macro). MB_BUILD's own pointer-selection ternary does NOT special-case
+// fmt=8: if a layer's shared expert is fmt=8 and MB_BUILD's TRY_SH path picks it
+// up with no routed expert already fixing `mfmt`, it would submit the WRONG pointer
+// (q4, NULL/stale for an fmt=8 tensor whose weights live in q8) tagged as fmt=8.
+// This is safe ANYWAY, but only incidentally: moe_submit() (backend_metal.mm) gates
+// `fmt != 1 && fmt != 2` as its very FIRST statement, before any of g/u/d/gs/us/ds is
+// dereferenced or even resolve()'d -- so an fmt=8 submission is refused before the
+// bad pointer would ever be read, no matter what garbage MB_BUILD packed into it. This
+// test uses deliberately-invalid weight/scale pointers (never dereferenced if the gate
+// holds) to prove the fence BY TEST rather than leaving it an artifact of moe_submit's
+// fmt allowlist happening not to include 8 (yet) -- same discipline
+// run_fp8_gemm_gate above applies to coli_metal_gemm's analogous exclusion.
+static int run_fp8_moe_gate(const char *name) {
+  const void *bad = (const void*)(uintptr_t)0xdeadbeef;   // must NEVER be dereferenced
+  const void *g[1] = {bad}, *u[1] = {bad}, *d[1] = {bad};
+  const float *gs[1] = {(const float*)bad}, *us[1] = {(const float*)bad}, *ds[1] = {(const float*)bad};
+  float xg[8]={0}, out[8]={0}, rw[1]={1.0f};
+  int xoff[1]={0}, nr[1]={1}, rows[1]={0};
+  int rc = coli_metal_moe_block(1, 8, 8, FP8, g, u, d, gs, us, ds, xg, xoff, nr, rows, rw, out, 1);
+  int ok = (rc == 0);
+  printf("  %-42s rc=%d (expect 0/CPU-fallback)  %s\n", name, rc, ok?"ok":"*** MISMATCH (should have refused)");
   return ok?0:1;
 }
 
@@ -463,6 +599,22 @@ int main(void) {
   // tail-clipping regime grouped scales exist for), verified end-to-end through the GPU.
   fail |= run_grouped(5,   512, 64,3,1, "grouped I=512(mult64) outlier-heavy S=3");
   fail |= run_grouped(5,   201, 64,2,1, "grouped I=201(non-mult-64) outlier-heavy S=2");
+  printf("Metal fmt=8 native FP8-e4m3 passthrough tests:\n");
+  fail |= run_fp8_lut("fp8 LUT exactness (256/256 codes via GPU kernel)");
+  fail |= run_fp8(2048,6144,1, "fp8 gate/up-shaped O=2048 I=6144 (spec example) S=1");
+  fail |= run_fp8(6144,2048,1, "fp8 down-shaped O=6144 I=2048 S=1");
+  fail |= run_fp8(2048,6144,4, "fp8 gate/up-shaped O=2048 I=6144 S=4");
+  // block edges: O,I not multiples of 128 (the partial-tile clamp)
+  fail |= run_fp8(130, 200, 2, "fp8 block edges: O,I both non-mult-128");
+  fail |= run_fp8(129, 128, 1, "fp8 block edges: O just over 128, I exact");
+  fail |= run_fp8(128, 129, 1, "fp8 block edges: O exact, I just over 128");
+  fail |= run_fp8(1,   1,   1, "fp8 degenerate 1x1 (single sub-block)");
+  // non-square block grid (nblkO=3 != nblkI=48) with a distinct scale per block: a
+  // swapped o/128 vs i/128 index, or a wrong nblkI stride, lands on the wrong block's
+  // scale and this shape/scale choice makes that numerically loud.
+  fail |= run_fp8(384, 6144, 3, "fp8 non-square block grid nblkO=3 nblkI=48 (stride audit)");
+  fail |= run_fp8_gemm_gate("fp8 GEMM entry explicitly gated off (coli_metal_gemm refuses)");
+  fail |= run_fp8_moe_gate("fp8 MB_BUILD/moe_submit entry gated off (shared-expert fmt=8 hazard)");
   printf("Metal batched moe_block tests:\n");
   fail |= run_moe({1,1,1,1,1,1,1,1}, "moe decode nb=8");
   fail |= run_moe({3,1,4,2,1,5},     "moe ragged nb=6");

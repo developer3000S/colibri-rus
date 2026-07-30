@@ -153,7 +153,7 @@ lets tooling confirm two shards used the identical table without diffing
 the base64 blob. `table_id` is provenance metadata (a retuned future table
 would ship as `g1`); readers never resolve it externally.
 
-## THE STAMP IS MANDATORY (the load-bearing difference from fmt=7)
+## THE STAMP IS MANDATORY (the load-bearing difference from fmt=8)
 
 `__metadata__["colibri.fmt"]` maps each entropy-coded **weight** tensor
 name (never `.qs`) to the string `int4-rans256-g0`, JSON-encoded with

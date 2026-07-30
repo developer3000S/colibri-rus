@@ -110,6 +110,7 @@ See [docs/vulkan.md](vulkan.md). On multi-core boxes also set `COLI_NO_OMP_TUNE=
 | `CUDA_EXPERT_GB` | `0` | VRAM budget (GB) for caching experts on the GPU. |
 | `CUDA_RELEASE_HOST` | auto (`1` if >1 device) | Release host-side copies after upload. |
 | `COLI_CUDA_ATTN` | off | Run S≤4 attention on the GPU. |
+| `COLI_CUDA_ATTN_PREFIX` | off | Reuse one uploaded decode activation across `q_a` and `kv_a` while preserving the stock CPU RMSNorm path. |
 | `COLI_CUDA_ATTN_SHARD` | off | `=1` splits KV-b heads across devices during attention load (multi-GPU). |
 | `COLI_CUDA_PROFILE` | off | Emit CUDA timing. |
 | `COLI_CUDA_PIPE` | `0` (off) | `1` engages the multi-step attention pipeline; `2` enables the pipe2 path. |
@@ -125,6 +126,11 @@ See [docs/vulkan.md](vulkan.md). On multi-core boxes also set `COLI_NO_OMP_TUNE=
 | `COLI_CUDA_TC_W4A16_MIN` | `16` | Per-expert row threshold above which W4A16 TC tiles dispatch (smaller batches fall back to the naive kernel). |
 | `COLI_CUDA_SHARED_W4A16` | off | `=1` uploads shared-expert weights and runs the shared-MLP W4A16 Tensor Core kernel. |
 | `COLI_CUDA_SHARED_W4A16_MIN_ROWS` | `32` | Min row count to engage the shared-MLP W4A16 kernel. |
+| `CUDA_RAW_EXPERTS` | unset | Experimental ANS build only: keep this many hottest experts raw, then store subsequent VRAM experts losslessly compressed. Requires `COLI_ANS_SIDECAR`. |
+| `COLI_ANS_SIDECAR` | unset | Experimental ANS build only: path to the sequential compressed-expert sidecar. |
+| `COLI_ANS_PACK` | `0` | Experimental ANS build only: `=1` creates `COLI_ANS_SIDECAR` during pinning and exits before inference. |
+| `COLI_ANS_DIRECT` | `0` | Experimental ANS build on Linux: `=1` reads the sidecar with aligned `O_DIRECT`, bypassing page-cache overhead. Falls back to buffered I/O if unavailable. |
+| `COLI_ANS_PROFILE` | `0` | Experimental ANS build: print sidecar header, read, staging/allocation, and H2D enqueue timings on first use. |
 | `COLI_METAL_UNTRACKED` | off (Metal only) | `=1` sets `MTLResourceHazardTrackingModeUntracked` on Metal buffers (reduces hazard-tracking overhead). |
 
 > **Windows note.** On Windows, a bare `coli chat` / `coli run` / `coli serve`

@@ -353,6 +353,7 @@ static int g_cuda_expert_auto;
 static int g_cuda_dense;
 static int g_cuda_release_host;
 static double g_cuda_reserve_gb;   /* CUDA_RESERVE_GB: VRAM headroom kept free of expert tier (default 2 GB) */
+static int g_cuda_raw_experts=-1;   /* experimental ANS tier: keep this global hot prefix raw */
 static int g_cuda_devices[COLI_CUDA_MAX_DEVICES], g_cuda_ndev, g_cuda_rr;
 static int64_t g_cuda_dense_projected[COLI_CUDA_MAX_DEVICES];
 static void qt_cuda_reset(QT *t){
@@ -416,6 +417,12 @@ static int qt_cuda_upload(QT *t){
         return coli_cuda_tensor_upload_g(&t->cuda,weights,t->s,t->fmt,t->I,t->O,t->cuda_device,t->gs);
     return coli_cuda_tensor_upload(&t->cuda,weights,t->s,t->fmt,t->I,t->O,t->cuda_device);
 }
+#ifdef COLI_ANS
+static int qt_cuda_upload_compressed(QT *t){
+    if(t->fmt!=2) return 0;
+    return coli_cuda_tensor_upload_compressed(&t->cuda,t->q4,t->s,t->fmt,t->I,t->O,t->cuda_device);
+}
+#endif
 static int qt_cuda_update(QT *t){
     const void *weights=t->fmt==0?(const void*)t->qf:
                         t->fmt==1?(const void*)t->q8:(const void*)t->q4;
@@ -2282,7 +2289,19 @@ static void expert_host_release(Model *m, ESlot *s){
      * fixed at the original expert_load site. fslab is plain malloc/falloc
      * on the CPU path, so its free() stays plain (Metal path frees it before
      * re-alloc and never reaches here with an aligned fslab on _WIN32). */
-    if(s->aslab){ s->slab=NULL; s->fslab=NULL; }  /* arena slice (#419): detach, keep caps, never free */
+    if(s->aslab){
+#ifdef __linux__
+        /* The arena owns the virtual address, not the resident pages.  A GPU
+         * slot no longer needs its host copy after the synchronous H2D upload.
+         * Keeping those anonymous pages resident made every live REPIN pass
+         * grow RSS by one swapped batch (~300 MB at 16 experts).  DONTNEED
+         * preserves the reusable slice while returning its pages to Linux;
+         * expert_host_ensure reloads them before the slot can run on CPU. */
+        madvise(s->slab,(size_t)s->slab_cap,MADV_DONTNEED);
+        madvise(s->fslab,(size_t)s->fslab_cap*sizeof(float),MADV_DONTNEED);
+#endif
+        s->slab=NULL; s->fslab=NULL;               /* detach, keep caps/arena ownership */
+    }
     else { compat_aligned_free(s->slab); free(s->fslab); s->slab=NULL; s->fslab=NULL; s->slab_cap=s->fslab_cap=0; }
     QT *q[3]={&s->g,&s->u,&s->d};
     for(int k=0;k<3;k++){ q[k]->qf=NULL; q[k]->q8=NULL; q[k]->q4=NULL; q[k]->s=NULL; }
@@ -2583,6 +2602,32 @@ done:
     free(chost);                              /* gli scratch device restano al contesto */
     return ok;
 }
+
+/* Decode-scale prefix only: upload x once and reuse it for q_a and kv_a. Keep
+ * the stock CPU RMSNorm between q_a and q_b so greedy output stays exact, then
+ * return Q/comp to the stock attention path. */
+static int attn_pipe_prefix(Model *m,Layer *l,const float *x,int S,float *QR,float *Q,float *comp){
+    Cfg *c=&m->c; int D=c->hidden,ql=c->q_lora,kvl=c->kv_lora,R=c->qk_rope;
+    int dev=l->q_a.cuda_device;
+    if(S<1||S>4||dev<0||l->q_b.cuda_device!=dev||l->kv_a.cuda_device!=dev) return 0;
+    size_t xb=(size_t)S*D*4,qrb=(size_t)S*ql*4;
+    size_t qb=(size_t)S*c->n_heads*c->qk_head*4,cb=(size_t)S*(kvl+R)*4;
+    float *xd=coli_cuda_pipe_scratch(dev,0,xb);
+    float *qrd=coli_cuda_pipe_scratch(dev,1,qrb);
+    float *qd=coli_cuda_pipe_scratch(dev,2,qb);
+    float *cd=coli_cuda_pipe_scratch(dev,3,cb);
+    if(!xd||!qrd||!qd||!cd) return 0;
+    if(!coli_cuda_pipe_upload(dev,xd,x,xb)||
+       !coli_cuda_pipe_gemm(l->q_a.cuda,qrd,xd,S)||
+       !coli_cuda_pipe_download(dev,qrd,QR,qrb)) return 0;
+    for(int s=0;s<S;s++) rmsnorm(QR+(int64_t)s*ql,QR+(int64_t)s*ql,l->q_a_ln,ql,c->eps);
+    if(!coli_cuda_pipe_upload(dev,qrd,QR,qrb)||
+       !coli_cuda_pipe_gemm(l->q_b.cuda,qd,qrd,S)||
+       !coli_cuda_pipe_gemm(l->kv_a.cuda,cd,xd,S)||
+       !coli_cuda_pipe_download(dev,qd,Q,qb)||
+       !coli_cuda_pipe_download(dev,cd,comp,cb)) return 0;
+    return 1;
+}
 #endif
 
 static void attention_rows(Model *m, Layer *l, int layer, float *x, int S, int pos_base,
@@ -2641,7 +2686,7 @@ static void attention_rows(Model *m, Layer *l, int layer, float *x, int S, int p
      * batch-union. matmul_qt_ex(...,0) keeps them on the EXACT int4 kernel: letting S>1 pull
      * them into IDOT is much faster but costs ~12% perplexity (measured). Batching alone is
      * bit-identical to upstream; the kernel switch is not. */
-    int pipe_done=0;
+    int pipe_done=0,prefix_done=0;
 #ifdef COLI_CUDA
     if(g_cuda_pipe&&!kvs&&S>=8&&layer<c->n_layers&&g_cuda_enabled&&c->kv_lora<=512&&
        !(m->has_dsa&&pos_base+S>c->index_topk)&&
@@ -2650,8 +2695,14 @@ static void attention_rows(Model *m, Layer *l, int layer, float *x, int S, int p
        qt_cuda_upload(&l->q_a)&&qt_cuda_upload(&l->q_b)&&qt_cuda_upload(&l->kv_a)&&
        qt_cuda_upload(&l->kv_b)&&qt_cuda_upload(&l->o))
         pipe_done=attn_pipe_prefill(m,l,layer,x,0,S,pos_base,out,NULL);
+    if(!pipe_done&&getenv("COLI_CUDA_ATTN_PREFIX")&&atoi(getenv("COLI_CUDA_ATTN_PREFIX"))&&
+       !kvs&&S<=4&&g_cuda_enabled&&
+       (!m->has_dsa||pos_base+S<=c->index_topk)&&
+       l->q_a.cuda_eligible&&l->q_b.cuda_eligible&&l->kv_a.cuda_eligible&&
+       qt_cuda_upload(&l->q_a)&&qt_cuda_upload(&l->q_b)&&qt_cuda_upload(&l->kv_a))
+        prefix_done=attn_pipe_prefix(m,l,x,S,QR,Q,comp);
 #endif
-    if(!pipe_done){
+    if(!pipe_done&&!prefix_done){
         int vk_qp=0; (void)vk_qp;
 #ifdef COLI_VULKAN
         /* Single-submit q-prep chain: [q_a+kv_a] -> rmsnorm(q latent, on-GPU) -> q_b.
@@ -7271,6 +7322,13 @@ static void pin_load(Model *m, const char *statspath, double gb){
     if(g_cuda_expert_auto) budget=safe_total;
     if(g_cuda_enabled&&g_cuda_release_host&&budget>0){
         prefix_est=(int)(budget/eb)+g_cuda_ndev;
+#ifdef COLI_ANS
+        if(g_cuda_raw_experts>=0){
+            int raw=g_cuda_raw_experts;
+            if((double)raw*eb>budget) raw=(int)(budget/eb);
+            prefix_est=raw+(int)((budget-(double)raw*eb)/(0.80*eb))+g_cuda_ndev;
+        }
+#endif
         npin+=prefix_est;                       /* additive: prefix RAM is returned after upload */
     }
 #endif
@@ -7312,17 +7370,34 @@ static void pin_load(Model *m, const char *statspath, double gb){
             int li=r[a].l;
             { ESlot *s=&m->pin[li][slot_of[a]];
                 int64_t need=qt_bytes(&s->g)+qt_bytes(&s->u)+qt_bytes(&s->d);
-                if(m->gpu_expert_bytes+need>budget) break;
+                int compress=0;
+#ifdef COLI_ANS
+                compress=g_cuda_raw_experts>=0&&a>=g_cuda_raw_experts;
+#endif
+                int64_t projected=compress?need*80/100:need;
+                if(m->gpu_expert_bytes+projected>budget) break;
                 int tried[COLI_CUDA_MAX_DEVICES]={0}, placed=0;
                 for(int attempt=0;attempt<g_cuda_ndev && !placed;attempt++){
                     int best=-1;
-                    for(int i=0;i<g_cuda_ndev;i++) if(!tried[i] && remaining[i]>=need &&
+                    for(int i=0;i<g_cuda_ndev;i++) if(!tried[i] && remaining[i]>=projected &&
                         (best<0||placed_b[i]<placed_b[best])) best=i;
                     if(best<0) break;
                     tried[best]=1;
                     s->g.cuda_device=s->u.cuda_device=s->d.cuda_device=g_cuda_devices[best];
                     s->g.cuda_eligible=s->u.cuda_eligible=s->d.cuda_eligible=1;
-                    if(qt_cuda_upload(&s->g) && qt_cuda_upload(&s->u) && qt_cuda_upload(&s->d)){
+                    int uploaded=
+#ifdef COLI_ANS
+                        compress ? (qt_cuda_upload_compressed(&s->g)&&qt_cuda_upload_compressed(&s->u)&&
+                                    qt_cuda_upload_compressed(&s->d)) :
+#endif
+                        (qt_cuda_upload(&s->g) && qt_cuda_upload(&s->u) && qt_cuda_upload(&s->d));
+#ifdef COLI_ANS
+                    if(compress&&!uploaded){
+                        fprintf(stderr,"[ANS] sidecar load failed; refusing partial VRAM placement\n");
+                        exit(2);
+                    }
+#endif
+                    if(uploaded){
                         int64_t actual=(int64_t)coli_cuda_tensor_bytes(s->g.cuda)
                                       +(int64_t)coli_cuda_tensor_bytes(s->u.cuda)
                                       +(int64_t)coli_cuda_tensor_bytes(s->d.cuda);
@@ -7857,8 +7932,22 @@ int main(int argc, char **argv){
     g_cuda_expert_auto=cuda_expert&&!strcmp(cuda_expert,"auto");
     g_cuda_expert_gb=cuda_expert&&!g_cuda_expert_auto?atof(cuda_expert):0;
     g_cuda_reserve_gb=getenv("CUDA_RESERVE_GB")?atof(getenv("CUDA_RESERVE_GB")):2.0;
+#ifdef COLI_ANS
+    g_cuda_raw_experts=getenv("CUDA_RAW_EXPERTS")?atoi(getenv("CUDA_RAW_EXPERTS")):-1;
+    if(g_cuda_raw_experts>=0&&(!getenv("COLI_ANS_SIDECAR")||!*getenv("COLI_ANS_SIDECAR"))){
+        fprintf(stderr,"COLI_ANS_SIDECAR is required when CUDA_RAW_EXPERTS is set\n");
+        return 1;
+    }
+    if(g_cuda_raw_experts>=0&&g_repin){
+        fprintf(stderr,"REPIN is incompatible with the fixed-order ANS sidecar\n");
+        return 1;
+    }
+#endif
     if(!getenv("REPIN")&&g_cuda_expert_auto&&getenv("PIN_GB")&&
        !strcmp(getenv("PIN_GB"),"all")) g_repin=16;
+#ifdef COLI_ANS
+    if(g_cuda_raw_experts>=0) g_repin=0;
+#endif
     /* CUDA_RELEASE_HOST default: ndev>1 was chosen when the host copy was the
      * multi-GPU re-upload path. On a SINGLE GPU asked to fill RAM as well
      * (PIN_GB=all, or a PIN_GB large enough that the two tiers compete), that
@@ -8011,6 +8100,13 @@ int main(int argc, char **argv){
             pin_load(&m,pin,pin_gb&&!strcmp(pin_gb,"all")?-1.0:pin_gb?atof(pin_gb):10.0);   /* PIN_GB=all (#80) */
         }
     }
+#if defined(COLI_CUDA) && defined(COLI_ANS)
+    if(getenv("COLI_ANS_PACK")&&atoi(getenv("COLI_ANS_PACK"))){
+        fprintf(stderr,"[ANS] sidecar packing complete; exiting before inference\n");
+        coli_cuda_shutdown();
+        return 0;
+    }
+#endif
     if(getenv("COUPLE")&&*getenv("COUPLE")){    /* coupling-scored cross-layer prefetch (#176) */
         g_couple_k=getenv("COUPLE_K")?atoi(getenv("COUPLE_K")):8;
         if(g_couple_k<1)g_couple_k=1; if(g_couple_k>32)g_couple_k=32;

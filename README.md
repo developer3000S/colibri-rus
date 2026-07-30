@@ -302,8 +302,11 @@ git clone https://github.com/JustVugg/colibri && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 ```
 
-Want `coli` on your PATH? From a checkout, `pip install -e .` registers it (the
-engine still lives in `c/` — an editable install from the clone, not a wheel).
+Want `coli` on your PATH? From a checkout, `pip install -e .` registers it; the
+editable install continues to use the engine in `c/`. A wheel bundles the
+launcher, server control plane, and guided RAM-disk UI, but not a
+platform-specific native engine binary. Build the engine from source or point
+`COLI_ENGINE` at a compatible release binary before starting inference.
 
 ### 2. Get the model
 
@@ -356,14 +359,24 @@ trade-off written down.
 COLI_MODEL=/nvme/glm52_i4 ./coli chat     # RAM budget, cache and MTP auto-detected
 COLI_MODEL=/nvme/glm52_i4 ./coli plan     # inspect the planned VRAM/RAM/disk placement
 COLI_MODEL=/nvme/glm52_i4 ./coli doctor   # read-only readiness check
+./coli ramdisk --model /nvme/glm52_i4     # Linux NUMA/tmpfs staging and managed engines
 COLI_MODEL=/nvme/glm52_i4 ./coli doctor --deep  # strict tensors/shards/index/mirror preflight
 ./coli web  --model /nvme/glm52_i4        # API + web dashboard on one port
 ./coli serve --model /nvme/glm52_i4       # OpenAI-compatible API only
 ```
 
-On Windows the same commands work with `python coli chat --model D:\glm52_i4`.
-The engine at runtime is pure C — python is only used by the one-time converter
-and the optional API gateway.
+On Windows the portable commands work with syntax such as
+`python coli chat --model D:\glm52_i4`.
+The engine runtime remains pure C. Python is used by the standard-library CLI,
+one-time converter, optional API gateway, and RAM-disk control plane.
+
+`coli ramdisk` opens a guided Linux RAM-workspace console. A new workspace asks
+for **Fastest GPU staging** (default), **Single RAM copy**, **Minimal RAM**, or
+**Multiple NUMA replicas**. Each choice produces a draft that shows the exact
+copy count, NUMA nodes, CPU mask, RAM cost, engines, and endpoints before
+anything is mounted. GPU-aware placement falls back visibly to a shared
+single-copy plan when it cannot prove a safe CUDA/NUMA layout; it never selects
+replicas automatically.
 
 #### The same commands run any of the models
 
@@ -413,6 +426,44 @@ Two things that differ per model, both documented in the per-model page:
 | OpenAI-compatible API, KV slots, web dashboard | [docs/api.md](docs/api.md) |
 | Grammar-forced drafts (structured output) | [docs/grammar-draft.md](docs/grammar-draft.md) |
 | Environment variable inventory | [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) |
+| CLI flags and RAM-disk lifecycle commands | [docs/SETTINGS.md](docs/SETTINGS.md) |
+| Shared full-model RAM-workspace TUI how-to | [docs/ramdisk-tui-howto.md](docs/ramdisk-tui-howto.md) |
+| RAM-workspace TUI operator and developer guide | [docs/ramdisk-tui.md](docs/ramdisk-tui.md) |
+
+## Development checks
+
+The normal cross-platform gate is model-free:
+
+```bash
+make -C c check
+```
+
+It builds the portable CPU engine and runs the C and Python unit, CLI, and
+packaging suites. It does not require `COLI_MODEL`, download model weights, or
+run full-model inference. The committed Nix flake provides the equivalent
+reproducible Linux/macOS package validation:
+
+```bash
+nix flake check --no-update-lock-file
+nix build --no-link .#colibri
+```
+
+The repository uses Nix directly and does not carry a Devbox configuration;
+`flake.lock` is the single committed dependency lock for this environment.
+
+Real Linux RAM-disk validation is explicitly opt-in. Run these only in a
+suitable privileged/private mount environment:
+
+```bash
+cd c
+COLI_RAMDISK_INTEGRATION=1 python3 -m unittest discover -s tests -p 'test_ramdisk_integration.py' -v
+COLI_RAMMAP_E2E_MODEL=/dev/shm/glm_i4 python3 -m unittest discover -s tests -p 'test_rammap_e2e.py' -v
+```
+
+The first gate exercises the real tmpfs lifecycle with a generated tiny
+fixture. The second consumes an existing compatible tmpfs-backed int4 model
+directory supplied by the caller; it never downloads one. Both tests skip when
+their environment gate is absent.
 
 ## What's next
 

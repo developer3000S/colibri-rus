@@ -90,6 +90,12 @@ jobs:
           cp c/openai_server.py dist/
           cp c/resource_plan.py dist/
           cp c/doctor.py dist/
+          cp c/ramdisk.py dist/
+          cp c/ramdisk_ui.py dist/
+          cp c/ramdisk_textual.py dist/
+          mkdir -p dist/ramdisk_support
+          cp c/ramdisk_support/*.py dist/ramdisk_support/
+          cp c/requirements-tui.txt dist/
           cp LICENSE dist/
           # web/dist sits NEXT TO coli in the archive; both coli and openai_server.py
           # probe that layout as well as the source checkout's one-level-up form.
@@ -115,7 +121,7 @@ jobs:
             tar xzf ../dist/colibri-${TAG}-${{ matrix.name }}.tar.gz
           fi
           test -x colibri${{ matrix.ext }} || { echo "engine missing from archive"; ls -la; exit 1; }
-          out=$(python3 coli info 2>&1 || true)
+          out=$(python3 coli info 2>&1)
           echo "$out"
           case "$out" in
             *"engine is not built"*) echo "FAIL: coli cannot find the packaged engine"; exit 1 ;;
@@ -124,6 +130,22 @@ jobs:
           # (The v1.1.0 tag build failed here when the banner still said "colibrì".)
           echo "$out" | grep -q "colibri" || { echo "FAIL: coli did not run"; exit 1; }
           echo "OK: coli locates the engine in the published archive"
+          echo "$out" | grep -Fq "ready ✓" || { echo "FAIL: coli cannot find the packaged engine"; exit 1; }
+          python3 coli ramdisk --help > ramdisk-help.txt
+          grep -Fq "interleaved = one shared model copy" ramdisk-help.txt || {
+            echo "FAIL: packaged RAM-disk UI modules did not load"; exit 1;
+          }
+          test -z "$(find ramdisk_support -type f ! -name '*.py' -print -quit)" || {
+            echo "FAIL: packaged RAM-disk support contains generated artifacts"; exit 1;
+          }
+          python3 -m compileall -q ramdisk.py ramdisk_ui.py ramdisk_textual.py ramdisk_support
+          PYTHONPATH=. python3 -c "import pkgutil, ramdisk_support; [__import__(item.name) for item in pkgutil.walk_packages(ramdisk_support.__path__, ramdisk_support.__name__ + '.')]"
+          test -f requirements-tui.txt || {
+            echo "FAIL: packaged Textual dependency contract is missing"; exit 1;
+          }
+          python3 -m pip install --disable-pip-version-check -r requirements-tui.txt
+          PYTHONPATH=. python3 -c "import ramdisk_textual; assert ramdisk_textual.RamdiskTextualApp"
+          echo "OK: packaged engine and guided Textual UI load from one archive"
           # Same reasoning for the dashboard: assert the files are there AND that the
           # server resolves them, since a right-looking archive with an unresolvable
           # path is exactly the failure this whole step exists to catch.

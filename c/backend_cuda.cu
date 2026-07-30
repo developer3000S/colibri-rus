@@ -1346,8 +1346,11 @@ extern "C" void coli_cuda_tensor_free(ColiCudaTensor *tensor) {
 
 extern "C" size_t coli_cuda_tensor_bytes(const ColiCudaTensor *tensor) {
     if (!tensor) return 0;
-    int ng = tensor->ng > 0 ? tensor->ng : 1;
-    return tensor->weight_bytes + (tensor->fmt ? (size_t)tensor->O * ng * sizeof(float) : 0);
+    /* Report exactly what upload charged to the device counter.  In
+     * particular, fmt=6/E8 stores scales inside each weight block and has no
+     * separate scale allocation. */
+    return tensor->weight_bytes +
+        ((tensor->fmt && tensor->fmt != 6) ? tensor->scale_count * sizeof(float) : 0);
 }
 
 extern "C" int coli_cuda_tensor_device(const ColiCudaTensor *tensor) {

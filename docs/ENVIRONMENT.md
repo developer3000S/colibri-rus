@@ -2,11 +2,14 @@
 
 Reference for the environment variables read by the colibrì engine.
 
-**Generated from `dev @ d5327e2`** by scanning every `getenv()` site in `c/glm.c` and the other C sources (`c/olmoe.c`, `c/backend_cuda.cu`, `c/backend_metal.mm`). Defaults and behavior are taken from the source; see [MAINTAINING-DOCS.md](MAINTAINING-DOCS.md) to regenerate this after the code changes.
+The base inventory was generated from `dev @ d5327e2`. The RAM-workspace
+entries are verified against this source tree. Defaults and behavior are taken
+from source; see [MAINTAINING-DOCS.md](MAINTAINING-DOCS.md) for the refresh
+procedure.
 
 ## Which program reads these?
 
-The C engine binary (`c/glm`, built from `c/glm.c`) reads **all** of these. You rarely export them by hand — the `coli` CLI and `openai_server.py` translate most of their flags into these variables before launching `glm` (e.g. `--temp` → `TEMP`, `--ctx` → `CTX`). See [SETTINGS.md](SETTINGS.md) for the flag → variable mapping. Export a variable directly only to reach a knob the CLI doesn't surface, or to override what the CLI would set.
+The C engine binary (`c/colibri`, built from `c/colibri.c`) reads **all** of these. You rarely export them by hand — the `coli` CLI and `openai_server.py` translate most of their flags into these variables before launching Colibri (e.g. `--temp` → `TEMP`, `--ctx` → `CTX`). See [SETTINGS.md](SETTINGS.md) for the flag → variable mapping. Export a variable directly only to reach a knob the CLI doesn't surface, or to override what the CLI would set.
 
 Format: `VAR` — default — effect.
 
@@ -24,7 +27,7 @@ Format: `VAR` — default — effect.
 | `TOPK` | `0` (off) | Top-k filter on the sampling distribution (`0` = no limit). |
 | `TOPP` | `0` (off) | Top-p filter (`0` = use `NUCLEUS`). |
 | `SEED` | unset → seeded from clock + PID | RNG seed for sampling. **Unset = different every run.** Set a fixed value for reproducible sampling. |
-| `KVSAVE` | `1` (on) | Persist the KV cache to `<model>/.coli_kv` so a conversation reopens warm. `KVSAVE=0` disables save+load (lossless round-trip; does not change output). |
+| `KVSAVE` | `1` (on) | Persist the KV cache to `<COLI_STATE_DIR>/.coli_kv` so a conversation reopens warm. `KVSAVE=0` disables save+load (lossless round-trip; does not change output). |
 | `KV_SLOTS` | `1` | Number of independent KV conversation slots (1–16), used in serve mode. |
 | `THINK` | `0` (off) | Emit a `<think>` reasoning block. `THINK=1` turns on visible reasoning. |
 | `MTP` | on | Multi-Token Prediction (speculative draft head). `MTP=0` disables it. |
@@ -43,12 +46,18 @@ Format: `VAR` — default — effect.
 | `URING` | `0` (off) | Linux-only queued expert I/O. `URING=1` implies `PIPE=1`, forces cold reads through io-wq (`IOSQE_ASYNC`), replaces blocking loader pthreads and spin waits with batched SQEs/CQEs, and batches `PILOT_REAL` loads on a separate ring. Use `DIRECT=1` for cold NVMe to avoid page-cache copy/readahead limits. Fails clearly if the kernel denies io_uring; incompatible with `COLI_MMAP=1`. |
 | `DIRECT` | `0` (off) | Use `O_DIRECT`/unbuffered reads for expert slabs. **Drive-dependent — measure it on your hardware.** On real NVMe with DRAM cache and headroom it is often a large win (measured +34% decode with `PIPE=1` on a Blackwell/Windows box, and 4.25→9.69 GB/s in iobench on a GB10); on QLC/DRAM-less drives or slow/virtualised disks it can be neutral to negative. Helps sustained NVMe; keeps the zero-copy GPU path. |
 | `COLI_NO_OMP_TUNE` | off | **Kill-switch** for the OpenMP hot-thread tuning (`OMP_WAIT_POLICY=active` spin + proc-bind). Set `=1` when the CPU is mostly waiting on the GPU (Metal) so spin doesn't steal the shared power budget. |
-| `COLI_NUMA` | auto in generated plans on multi-socket Linux; otherwise off | `COLI_NUMA=1` selectively interleaves large expert and dense slabs across NUMA nodes via `mbind` (raw syscall, no libnuma). Helps multi-socket hosts (+7–40% expert matmul); silent no-op on single-node or non-Linux. Explicit `COLI_NUMA=0` overrides the generated plan. |
+| `COLI_NUMA` | on for generated shared plans; off for node-local replicas | `COLI_NUMA=1` applies a NUMA policy to large expert and dense slabs via `mbind` (raw syscall, no libnuma). Multiple selected nodes interleave; an explicit one-node `COLI_NUMA_NODES` mask binds to that node. Helps multi-socket hosts (+7–40% expert matmul); an implicit single-node host remains a no-op. Explicit `COLI_NUMA=0` overrides the generated plan. |
+| `COLI_NUMA_NODES` | all online nodes | Exact Linux NUMA range list for `COLI_NUMA=1`, including sparse IDs such as `0,2,8`. Managed values must be online and inside `Mems_allowed_list`; invalid or inapplicable masks fail closed. `coli ramdisk` sets this from the reviewed memory-node placement and uses a static bind when exactly one node is selected. |
+| `COLI_CPU_AFFINITY` | unset | Exact Linux CPU range list restored before the OpenMP self-reexec. The engine applies and reads back the mask, failing closed if offline CPUs or a cpuset narrow it. Managed RAM-disk engines set this automatically; unmanaged launches retain the historical all-online reset. |
 | `MLOCK` | `-1` (auto: on for macOS) | Wire the streamed expert cache into physical RAM (`mlock`) to dodge the memory compressor. `0` off, `1` force. |
 | `CAP_RAISE` | `1` (on) | Let the engine raise the expert-cache cap above `topk` when RAM allows (bigger batches). `0` fixes the cap. |
 | `PREFETCH` | `0` | Prefetch depth for streamed experts. |
-| `COLI_MMAP` | `0` | `mmap` the weights instead of read()-ing into slabs. |
-| `PIN` | unset | Path to a `.coli_usage`/stats file; pins the hottest experts into a resident "hot store" at startup. **`PIN=auto`** seeds from the model dir's live `.coli_usage` (appended after every turn, so each restart's pin placement follows the accumulated real workload) with `stats.txt` as the fallback for a virgin model dir; neither present → no pin this run. |
+| `COLI_WEIGHTS_DIR` | `SNAP` | Complete safetensors namespace used for weight loading. `coli ramdisk` points this at a tmpfs namespace containing staged shards and validated symlinks to unstaged canonical shards; configuration and tokenizer identity remain rooted at `SNAP`. |
+| `COLI_STATE_DIR` | `SNAP` | Durable directory for `.coli_usage` and `.coli_kv*`. Managed RAM-disk engines derive stable per-model/per-node directories from an absolute SSD-backed `XDG_STATE_HOME`; tmpfs/ramfs and paths beneath the volatile weight mount are rejected, so volatile weight mounts never hold runtime state. |
+| `COLI_RAMMAP` | `0` | Linux-only direct mapping of complete experts whose six weight/scale tensors are tmpfs-backed. Mapped experts bypass slabs and LRU I/O; unstaged experts keep the existing SSD path. Incompatible with `COLI_MMAP=1`. |
+| `COLI_RAM_PREFAULT` | `0` | Prefault direct RAM mappings at startup. Managed full-model mode defaults this to `1` for benchmarking; `0` leaves pages demand-faulted. |
+| `COLI_MMAP` | `0` | Legacy page-cache-backed `mmap` path. Do not combine it with `COLI_RAMMAP=1`; the engine rejects that configuration. |
+| `PIN` | unset | Path to a `.coli_usage`/stats file; pins the hottest experts into a resident "hot store" at startup. **`PIN=auto`** seeds from `COLI_STATE_DIR/.coli_usage` (updated after every turn) with `SNAP/stats.txt` as the fallback for a virgin state directory; neither present → no pin this run. RAM-mapped experts are already resident and are excluded from pin/LRU allocation. |
 | `PIN_GB` | `10.0` | Size budget (GB) for the pinned hot store when `PIN` is set. |
 | `AUTOPIN` | `1` (on) | Auto-pin the hot store from usage history once ≥5000 selections are recorded. |
 | `REPIN` | `0` (off) | Live re-pin the hot store every N emitted tokens (RFC). |
@@ -69,7 +78,7 @@ Format: `VAR` — default — effect.
 | `ABSORB` | `-1` (auto: absorbed for S≤4) | MLA attention absorption mode. |
 | `IDOT` | `1` | Integer dot-product kernel. `IDOT=0` uses exact f32 kernels (for A/B numerical checks). |
 | `COLI_POLICY` | `quality` | Resource policy: `quality`, `balanced`, or `experimental-fast`. |
-| `PROF` | `0` (off) | Performance profile: a startup header (machine + effective config), then per run — or per turn in serve mode, on stderr — forward-latency percentiles (p50/p90/p99/max), expert-I/O totals and cache-tier fill, phase shares of wall time, and a verdict naming the knob most likely to help on this machine. Output is additive; `PROF` unset changes nothing. |
+| `PROF` | `0` (off) | Performance profile: a startup header (machine + effective config), then per run — or per turn in serve mode, on stderr — forward-latency percentiles (p50/p90/p99/max), SSD-backed expert bytes requested, Linux block-layer `read_bytes`, cache-tier fill, phase shares of wall time, and a verdict naming the knob most likely to help on this machine. Output is additive; `PROF` unset changes nothing. |
 | `COLI_NO_FUSED_PAIR` | `0` (off) | `=1` disables the fused-pair matmul kernel. |
 | `DISK_SPLIT` | `0` (off) | `=1` splits the reported disk-load time across the draft/absorb/forward phases in stats. |
 | `I4S` | unset | Engage the int4 `IDOT` kernel only for batch `S>=<n>` (testing). |
@@ -178,7 +187,7 @@ These are for testing, benchmarking, or internal use — not part of the everyda
 
 ## Server / CLI (`openai_server.py`, `coli`)
 
-These are read by the Python programs (not the `glm` engine), so they don't appear in `glm.c`. They cover the OpenAI-compatible server, tool calling, and the debug view.
+These are read by the Python programs (not the C engine), so they don't appear in `colibri.c`. They cover the OpenAI-compatible server, tool calling, and the debug view.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -191,6 +200,7 @@ These are read by the Python programs (not the `glm` engine), so they don't appe
 | `COLI_ALLOWED_HOSTS` | unset | Comma-separated hostnames or IP addresses accepted by the DNS-rebinding guard in addition to loopback and the bind address. Equivalent to repeating `--allowed-host`. |
 | `COLI_MAX_QUEUE` | `8` | Max queued requests. |
 | `COLI_QUEUE_TIMEOUT` | `300` | Seconds a request may wait in the queue. |
+| `COLI_ENGINE_READY_TIMEOUT` | `7200` | Seconds the Python server waits for the C engine/model to become ready. Invalid values and timeouts terminate and reap the child process. |
 | `COLI_KV_SLOTS` | `1` | Independent KV conversation slots (→ engine `KV_SLOTS`). |
 | `COLI_POLICY` | `quality` | Resource policy (shared with the engine): `quality` \| `balanced` \| `experimental-fast`. |
 | `COLI_COLOR` | auto (TTY) | `COLI_COLOR=1` forces colored `coli` output when not a TTY. |
@@ -198,11 +208,24 @@ These are read by the Python programs (not the `glm` engine), so they don't appe
 
 > **Debugging an OpenCode session:** `COLI_DEBUG=1` watches the model's output stream; `COLI_DEBUG=2` shows both sides (prompt + output) as a transcript. Add `COLI_TOOL_SALVAGE=1` on int4 to catch mangled tool calls.
 
+### RAM-workspace control plane
+
+These variables configure the Linux `coli ramdisk` interface and its durable
+control state:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `COLI_RAMDISK_UI` | `auto` | TUI frontend: `auto` uses Textual when installed and otherwise curses; `textual` or `curses` requires that frontend. |
+| `XDG_STATE_HOME` | `~/.local/state` | Durable state base. RAM-workspace state lives below `colibri/ramdisk`; the value must resolve to an absolute non-volatile path. |
+| `COLI_RAMDISK_MANIFEST` | `$XDG_STATE_HOME/colibri/ramdisk/manifest.json` | Absolute durable override for the managed deployment manifest. |
+| `COLI_RAMDISK_START_TIMEOUT` | `7200` | Managed-engine startup timeout in seconds; accepted range is 1–86400. |
+| `COLI_BUILD_COMMIT` | auto-detected | Optional revision label stored in reproducible benchmark reports when Git metadata is unavailable or should be overridden. |
+
 ## Set by the CLI (don't usually set by hand)
 
 `coli` / `openai_server.py` set these internally to select a run mode or pass through a flag:
 
-- `SNAP` — model snapshot directory (required by `glm`; set from `--model`).
+- `SNAP` — model snapshot directory (required by Colibri; set from `--model`).
 - `SERVE`, `SERVE_BATCH` — select serve / batched-serve mode.
 - `PROMPT` — one-shot text mode (the engine also honors `COLI_PROMPT`, preferred cross-platform; `PROMPT` is ignored on Windows if it contains cmd.exe `$`-metacharacters).
 - `COLI_OMP_TUNED` — internal sentinel guarding the OMP re-exec (see `COLI_NO_OMP_TUNE`); not user-facing.

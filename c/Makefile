@@ -436,6 +436,12 @@ cuda-bench: backend_cuda.cu backend_cuda.h backend_gpu_compat.h tests/bench_tens
 olmoe$(EXE): olmoe.c st.h json.h compat.h sample.h tok.h tok_unicode.h tok_unicode_o200k.h
 	$(CC) $(CFLAGS) olmoe.c -o olmoe$(EXE) $(LDFLAGS)
 
+# Qwen3.6-35B-A3B engine (hybrid Gated Attention + Gated DeltaNet + streaming
+# MoE). CPU-only in this target; the optional CUDA expert tier is a separate
+# follow-up (see docs/qwen36-phase01.md).
+qwen36$(EXE): qwen36.c st.h json.h compat.h
+	$(CC) $(CFLAGS) qwen36.c -o qwen36$(EXE) $(LDFLAGS)
+
 inkling$(EXE): inkling.c st.h json.h compat.h $(INK_CUDA_OBJ)
 	$(CC) $(CFLAGS) inkling.c $(INK_CUDA_OBJ) -o inkling$(EXE) $(LDFLAGS)
 

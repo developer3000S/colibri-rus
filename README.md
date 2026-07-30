@@ -362,6 +362,7 @@ COLI_MODEL=/nvme/glm52_i4 ./coli chat     # RAM budget, cache and MTP auto-detec
 COLI_MODEL=/nvme/glm52_i4 ./coli plan     # inspect the planned VRAM/RAM/disk placement
 COLI_MODEL=/nvme/glm52_i4 ./coli doctor   # read-only readiness check
 COLI_MODEL=/nvme/glm52_i4 ./coli doctor --deep  # strict tensors/shards/index/mirror preflight
+COLI_MODEL=/nvme/glm52_i4 ./coli tune     # measure and save this machine's fastest safe execution profile
 ./coli web  --model /nvme/glm52_i4        # API + web dashboard on one port
 ./coli serve --model /nvme/glm52_i4       # OpenAI-compatible API only
 ```

@@ -79,7 +79,7 @@ Inside you'll find:
 |---|---|
 | `colibri.exe` | **the engine** — the C program that actually runs the model |
 | `coli` | the command-line launcher (`chat`, `serve`, `convert`, `doctor`, …) |
-| `openai_server.py`, `resource_plan.py`, `doctor.py` | Python support for the API server and placement planner |
+| `openai_server.py`, `resource_plan.py`, `doctor.py`, `autotune.py` | Python support for the API server, placement planner, diagnostics, and measured tuning |
 
 One setup step: **install Python 3** from
 [python.org](https://www.python.org/downloads/) — the `coli` launcher and the

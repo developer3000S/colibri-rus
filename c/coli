@@ -58,7 +58,7 @@ except ModuleNotFoundError:
         _version = "unknown"
 
 # Run-in-place (source checkout, "cd c && ./coli ..."): the engine, the
-# support modules (resource_plan.py, doctor.py, openai_server.py) and
+# support modules (resource_plan.py, doctor.py, autotune.py, openai_server.py) and
 # tools/ all live next to this script — unchanged from before.
 #
 # Installed layout ("make install"): this script is $(PREFIX)/bin/coli,
@@ -227,6 +227,7 @@ def resource_request(a, env):
     return ram,ctx,devices,vram
 
 def env_for(a):
+    explicit_env = set(os.environ)
     e = dict(os.environ, SNAP=a.model)
     if sys.platform == "win32":
         # COLI_NO_OMP_TUNE spegne SOLO il blocco OMP (stesso perimetro del
@@ -283,6 +284,14 @@ def env_for(a):
             sys.exit(f"{C.yel}invalid resource plan:{C.r} {error}")
         has_cuda=cuda_binary()
         e=environment_for_plan(plan,e,has_cuda)
+        if not getattr(a, "no_tune_profile", False):
+            from autotune import apply_profile, load_profile
+            profile=load_profile(plan,a.model,GLM)
+            if profile:
+                e=apply_profile(e,profile,explicit_env)
+                gain=100.0*profile["gain"]
+                print(f"  {C.dim}[TUNE] applied measured profile · +{gain:.1f}% calibration throughput{C.r}",
+                      file=sys.stderr)
         rt=plan["tiers"]["ram"]; vt=plan["tiers"]["vram"]
         gpu=f" · VRAM {format_bytes(vt['budget_bytes'])}" if has_cuda and vt["devices"] else " · CPU"
         print(f"  {C.dim}[PLAN] RAM {format_bytes(rt['budget_bytes'])} · cap {rt['cache_slots_per_layer']}/layer{gpu}{C.r}",file=sys.stderr)
@@ -596,6 +605,50 @@ def cmd_doctor(a):
     )
     print(json.dumps(report,indent=2) if a.json else format_doctor(report))
     return exit_code(report)
+
+def cmd_tune(a):
+    """Measure this exact model/hardware pair and persist the fastest safe path."""
+    need_model(a.model)
+    if a.tokens < 4:
+        sys.exit(f"{C.yel}--tokens must be at least 4{C.r}")
+    if a.timeout < 1:
+        sys.exit(f"{C.yel}--timeout must be positive{C.r}")
+    if not 0.0 <= a.min_gain <= 1.0:
+        sys.exit(f"{C.yel}--min-gain must be between 0 and 1{C.r}")
+    from autotune import run_tune
+    from resource_plan import build_plan
+    try:
+        ram,ctx,devices,vram=resource_request(a,os.environ)
+        plan=build_plan(a.model,ram,ctx,devices,vram,policy=a.policy)
+    except (OSError,ValueError,json.JSONDecodeError) as error:
+        sys.exit(f"{C.yel}cannot create tuning plan:{C.r} {error}")
+    a.auto_tier=True
+    a.no_tune_profile=True
+    base_env=env_for(a)
+    prompt=f"[gMASK]<sop><|user|>{a.prompt}<|assistant|><think></think>"
+    banner("tune · measured execution profile")
+    print(f"  fixed replay: {a.tokens} tokens · {a.repeats} run(s) per candidate")
+    print("  only quality-preserving scheduling knobs are eligible\n")
+    try:
+        profile,path=run_tune(
+            GLM,a.cap,base_env,plan,a.model,prompt,tokens=a.tokens,
+            repeats=a.repeats,timeout=a.timeout,min_gain=a.min_gain,
+            profile_dir=a.profile_dir,
+            progress=lambda message: print(f"  {C.dim}· {message}{C.r}",flush=True),
+        )
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as error:
+        sys.exit(f"{C.yel}tuning failed:{C.r} {error}")
+    if profile["accepted"]:
+        winner=profile["winner"]
+        baseline=profile["validation"]["baseline"]["tok_s"]
+        print(f"\n  {C.grn}✓ accepted{C.r} {winner['name']}: "
+              f"{baseline:.2f} → {winner['tok_s']:.2f} tok/s "
+              f"(+{100*profile['gain']:.1f}%)")
+        print(f"  env: {' '.join(f'{key}={value}' for key,value in winner['env'].items())}")
+    else:
+        print(f"\n  {C.grn}✓ baseline retained{C.r}: no candidate cleared the "
+              f"{100*a.min_gain:.1f}% gain and safety gates")
+    print(f"  profile: {path}\n")
 
 def cmd_run(a):
     need_model(a.model)
@@ -1043,6 +1096,8 @@ def main():
     common=argparse.ArgumentParser(add_help=False)
     common.add_argument("--model", default=DEF_MODEL); common.add_argument("--ram", type=int, default=0)  # 0 = auto (il motore usa l'88% della RAM disponibile)
     common.add_argument("--auto-tier",action="store_true",help="automatically apply the RAM/VRAM plan")
+    common.add_argument("--no-tune-profile",action="store_true",
+                        help="ignore a saved measured tuning profile")
     common.add_argument("--ctx",type=int,default=0)
     common.add_argument("--gpu",default=None,help="auto, none, or a device list such as 0,1")
     common.add_argument("--vram",type=float,default=0,help="total VRAM budget in GB (0=auto)")
@@ -1063,6 +1118,16 @@ def main():
     pd.add_argument("--json",action="store_true",help="emit a versioned JSON report")
     pd.add_argument("--deep",action="store_true",
                     help="strictly check every tensor layout, model index, and configured mirror")
+    pt=sub.add_parser("tune",parents=[common],
+                      description="measure and save the fastest quality-preserving execution profile",
+                      help="measure and save the fastest quality-preserving execution profile")
+    pt.add_argument("--prompt",default="Explain why fixed-token replay makes a benchmark reproducible.")
+    pt.add_argument("--tokens",type=int,default=16,help="calibration continuation length")
+    pt.add_argument("--repeats",type=int,choices=range(1,6),default=2)
+    pt.add_argument("--timeout",type=int,default=900,help="seconds allowed for each engine run")
+    pt.add_argument("--min-gain",type=float,default=0.03,
+                    help="minimum fractional throughput gain required to accept a candidate")
+    pt.add_argument("--profile-dir",default=None,help=argparse.SUPPRESS)
     pr=sub.add_parser("run", parents=[common]);  pr.add_argument("prompt", nargs="*")
     pc=sub.add_parser("chat", parents=[common])
     pc.add_argument("--attach", nargs="?", const="http://127.0.0.1:8000", default=None,
@@ -1112,7 +1177,7 @@ def main():
         help="int4 scale group size: 64 (default, group-scaled quality) or 0 (legacy per-row)")
     pc.add_argument("--no-mtp",action="store_true",help="skip the MTP head (no speculative drafts)")
     a=ap.parse_args()
-    handler={"build":cmd_build,"info":cmd_info,"plan":cmd_plan,"doctor":cmd_doctor,
+    handler={"build":cmd_build,"info":cmd_info,"plan":cmd_plan,"doctor":cmd_doctor,"tune":cmd_tune,
              "run":cmd_run,"chat":cmd_chat,"serve":cmd_serve,"stop":cmd_stop,"bench":cmd_bench,
              "convert":cmd_convert,"web":cmd_web}.get(a.cmd)
     if handler: sys.exit(handler(a) or 0)

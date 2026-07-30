@@ -33,6 +33,12 @@ class CliOutputLanguageTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--allowed-host", result.stdout)
 
+    def test_tune_help_describes_measured_safe_profile(self):
+        result = self.run_cli("tune", "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fastest quality-preserving execution profile", result.stdout)
+        self.assertIn("--min-gain", result.stdout)
+
     def test_info_status_is_english(self):
         with tempfile.TemporaryDirectory() as model:
             result = self.run_cli("info", "--model", model)

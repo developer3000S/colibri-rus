@@ -22,6 +22,7 @@ Flags may also be given **after** the subcommand. Most flags map onto an engine 
 | `info` | Print model / build info. |
 | `plan` | Show the computed RAM/VRAM placement plan (`--json` for machine-readable). |
 | `doctor` | Environment/health check (`--json` report, `--deep` strict preflight). |
+| `tune` | Measure and save the fastest quality-preserving execution profile for this machine/model. |
 | `run "<prompt>"` | One-shot generation for the given prompt (positional, may be multi-word). |
 | `chat` | Interactive REPL chat. |
 | `serve` | Start the OpenAI-compatible HTTP server. |
@@ -45,6 +46,7 @@ Flags may also be given **after** the subcommand. Most flags map onto an engine 
 | `--gpu` | `None` | `COLI_GPU(S)` | `auto`, `none`, or a device list like `0,1`. |
 | `--vram` | `0` (auto) | CUDA plan | Total VRAM budget in GB. |
 | `--auto-tier` | off | resource plan | Automatically apply the RAM/VRAM placement plan. |
+| `--no-tune-profile` | off | profile loader | Ignore a saved measured profile. |
 
 ### Subcommand-specific flags
 
@@ -74,6 +76,10 @@ Flags may also be given **after** the subcommand. Most flags map onto an engine 
 
 **`bench`**: `[tasks...]` (positional), `--limit 40`, `--data <bench dir>`.
 **`plan` / `doctor`**: `--json`.
+
+**`tune`**: `--prompt <text>`, `--tokens 16`, `--repeats 2`,
+`--timeout 900`, `--min-gain 0.03`. The command uses fixed-token replay and
+only tests quality-preserving execution scheduling.
 
 **`doctor`**: `--deep` strictly checks every safetensors header and tensor
 layout, filename-declared shard completeness, required core tensors, an

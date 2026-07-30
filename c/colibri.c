@@ -5924,6 +5924,9 @@ static void run_text(Model *m, const char *snap, const char *prompt, int ngen){
      * for exact A/B comparison across decode paths (e.g. resident vs CPU).
      * The ids are all[np .. np+produced-1]. */
     if(getenv("TOKENS") && atoi(getenv("TOKENS"))){
+        fprintf(stderr,"[PROMPT_TOKENS] %d:",np);
+        for(int i=0;i<np;i++) fprintf(stderr," %d",all[i]);
+        fprintf(stderr,"\n");
         fprintf(stderr,"[TOKENS] %d generated:",produced);
         for(int i=np;i<np+produced;i++) fprintf(stderr," %d",all[i]);
         fprintf(stderr,"\n");

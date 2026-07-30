@@ -61,6 +61,7 @@
 #include "grammar.h"                              /* metodo F: draft grammaticali (#48) */
 #include "schema_gbnf.h"                          /* SCHEMA=: JSON-Schema -> GBNF for method F */
 #include "decode_batch.h"
+#include "route_trace.h"                           /* ROUTE_TRACE + .coli_usage, engine-agnostic (#700) */
 #ifdef _OPENMP
 #include <omp.h>                                  /* scratch per-thread nell'attention */
 #else
@@ -773,10 +774,9 @@ static int g_draft=0;    /* metodo E: DRAFT=n token auto-speculati per forward v
  * parte (#8). MAI un vincolo sul sampling: solo proposte, la verifica batch-union
  * decide — grammatica sbagliata = draft rifiutati, output identico.
  * GRAMMAR_DRAFT=n (default 24) limita i token forzati per forward. */
-static FILE *g_route_fp=NULL; /* ROUTE_TRACE=<path>: dump per-position top-K routing (ids:gates)
-                               * per layer — offline co-activation / coupling analysis. Zero
-                               * effect on computation; measurement only. */
-static int g_route_call=0;
+/* ROUTE_TRACE=<path> (per-position top-K routing, for offline co-activation analysis)
+ * and the .coli_usage history both live in route_trace.h now, so every engine writes
+ * the same bytes. Measurement only; zero effect on computation. */
 /* COUPLE=<.coli_pairs>: coupling-scored cross-layer prefetch. The routing of layer L
  * strongly constrains the routing of L+1/L+2 (measured: median co-activation lift 1.8x
  * over independence, p99 40x, and the structure TRANSFERS across workloads — it is a
@@ -1283,7 +1283,9 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
 #endif
     m->eroute=calloc(NR,sizeof(int*)); m->enr=calloc(NR,sizeof(int));
     m->pin=calloc(NR,sizeof(ESlot*)); m->npin=calloc(NR,sizeof(int));
-    m->eusage=calloc(NR,sizeof(uint32_t*)); m->eheat=calloc(NR,sizeof(uint32_t*));
+    rt_init("glm_moe_dsa",c->n_layers,c->n_experts);   /* owns the counters + the format */
+    m->eusage=rt_counts_all();                         /* alias: bump sites unchanged */
+    m->eheat=calloc(NR,sizeof(uint32_t*));
     m->elast=calloc(NR,sizeof(uint32_t*));
     m->elast_dc=calloc(NR,sizeof(uint32_t*)); m->elast_pre=calloc(NR,sizeof(uint32_t*));
     m->kv=calloc(1,sizeof(KVState));
@@ -1327,7 +1329,6 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
 #endif
             m->ecache[i]=calloc(cap,sizeof(ESlot));
             m->eroute[i]=calloc(c->topk,sizeof(int));      /* metodo C: ultimo routing del layer */
-            m->eusage[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->eheat[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->elast[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->elast_dc[i]=calloc(c->n_experts,sizeof(uint32_t));
@@ -1380,7 +1381,6 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
             m->mtp_norm=ld(m,PM("shared_head.norm.weight"));
             m->ecache[i]=calloc(cap,sizeof(ESlot));
             m->eroute[i]=calloc(c->topk,sizeof(int));
-            m->eusage[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->eheat[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->elast[i]=calloc(c->n_experts,sizeof(uint32_t));
             m->elast_dc[i]=calloc(c->n_experts,sizeof(uint32_t));
@@ -1432,6 +1432,13 @@ static void model_init(Model *m, const char *snap, int cap, int ebits, int dbits
     }
     if(m->has_dsa) for(int i=0;i<c->n_layers;i++) if(c->idx_type[i])
         rb+=qt_bytes(&m->ix_wq[i])+qt_bytes(&m->ix_wk[i])+qt_bytes(&m->ix_wp[i]);
+    /* Dense layers, and the MTP row when the model has none, do not route and so get no
+     * counter row -- the exact shape eusage had before route_trace.h owned it. rt_init
+     * cannot know this: sparsity is settled while the layers are built, above. A row is
+     * the load admission rule, so dropping these is what keeps a history record naming a
+     * dense layer from being absorbed and written back out. */
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].sparse) rt_drop_row(i);
+    if(!m->has_mtp) rt_drop_row(c->n_layers);
     m->resident_bytes=rb;
 }
 
@@ -3342,16 +3349,12 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
         }
         if(c->norm_topk){ float sm=0; for(int kk=0;kk<Ke;kk++) sm+=w[kk]; sm+=1e-20f; for(int kk=0;kk<Ke;kk++) w[kk]/=sm; }
         for(int kk=0;kk<Ke;kk++) w[kk]*=c->routed_scale;
-        if(g_route_fp){                       /* ROUTE_TRACE: one line per (position, layer) */
-            fprintf(g_route_fp,"%d %d %d",g_route_call,s,layer);
-            for(int kk=0;kk<Ke;kk++) fprintf(g_route_fp," %d:%.4f",idx[kk],w[kk]);
-            fputc('\n',g_route_fp);
-        }
+        rt_trace(layer,s,idx,w,Ke);           /* ROUTE_TRACE: one line per (position, layer) */
         for(int d=0;d<D;d++) out[(int64_t)s*D+d]=0;
     }
     free(rank_buf); free(rank_w);
     if(g_prof)m->t_route+=now_s()-route_t0;
-    if(g_route_fp) g_route_call++;
+    rt_trace_end();
     if(g_couple && cp_pred && S<=8)
         for(int s2=0;s2<S;s2++) couple_prefetch(m,layer,idxs+(int64_t)s2*K,keff[s2]);
     if(g_looka && S==1 && layer<c->n_layers){
@@ -4701,7 +4704,7 @@ static int pipe_layer_sparse(Model *m, Layer *l, int li, float *x_dev, int S, in
      * ROUTE_P / ROUTE_TRACE keep the CPU ranking they need. */
     static int lr_idx[64]; static float lr_w[64]; static int lr_keff[1];
     int dev_routed=0;
-    if(g_cuda_router && S==1 && !g_cache_route && g_route_p<=0.f && !g_route_fp
+    if(g_cuda_router && S==1 && !g_cache_route && g_route_p<=0.f && !rt_tracing()
        && c->n_experts<=4096 && c->topk<=64 && !l->router_cuda_bad){
         int E=c->n_experts, K=c->topk;
         int Ksel = g_topk>0 ? (g_topk<K?g_topk:K) : K;
@@ -7209,19 +7212,30 @@ static void pin_arena_bind(Model *m, PinRec *r, int *slot_of, int from, int to){
 #endif
 static double expert_avail(Model *m, double ram_gb, int ebits, int max_ctx);  /* def. sotto */
 static double g_mem_avail_boot;   /* def. sotto (#653: corretta qui su GPU integrate) */
-static void pin_load(Model *m, const char *statspath, double gb){
-    FILE *f=fopen(statspath,"r"); if(!f){ perror(statspath); return; }
+/* Admission test unchanged; it just runs from route_trace.h's reader now, so PIN=<file>
+ * accepts every history layout an engine can write instead of only sparse text (#700). */
+typedef struct { Model *m; PinRec *r; int *n, cap; unsigned char *seen; } PinCollect;
+static int pin_collect_cb(int l, int e, uint32_t cnt, void *ud){
+    PinCollect *p=(PinCollect*)ud; Model *m=p->m; Cfg *c=&m->c;
+    if(*p->n>=p->cap) return 0;
+    int ok = l>=0 && e>=0 && e<c->n_experts &&
+             ((l<c->n_layers && m->L[l].sparse) || (l==c->n_layers && m->has_mtp));
+    int64_t key=(int64_t)l*c->n_experts+e;
+    if(ok&&!p->seen[key]){ p->r[(*p->n)++]=(PinRec){l,e,cnt}; p->seen[key]=1; return 1; }
+    return 0;
+}
+/* trusted=1 only when the user typed this path. An auto-discovered history has not been
+ * vouched for by anyone, so it stays subject to the identity check like any other. */
+static void pin_load(Model *m, const char *statspath, double gb, int trusted){
+    { FILE *probe=fopen(statspath,"rb");        /* keep the same message on a bad path */
+      if(!probe){ perror(statspath); return; } fclose(probe); }
     Cfg *c=&m->c; int cap=(c->n_layers+1)*c->n_experts;
     PinRec *r=malloc((size_t)cap*sizeof(PinRec)); int n=0;
     unsigned char *seen=calloc((size_t)(c->n_layers+1)*c->n_experts,1);
-    int l,e; uint32_t cnt;
-    while(n<cap && fscanf(f,"%d %d %u",&l,&e,&cnt)==3){
-        int ok = l>=0 && e>=0 && e<c->n_experts &&
-                 ((l<c->n_layers && m->L[l].sparse) || (l==c->n_layers && m->has_mtp));
-        int64_t key=(int64_t)l*c->n_experts+e;
-        if(ok&&!seen[key]){ r[n++]=(PinRec){l,e,cnt}; seen[key]=1; }
-    }
-    fclose(f);
+    /* A named file is what the identity refusal tells the user to pass, so honouring it
+     * here is what makes that message true. Dimensions and format version still apply:
+     * those refusals never offered a way past them. */
+    { PinCollect pc={m,r,&n,cap,seen}; rt_read_ex(statspath,pin_collect_cb,&pc,trusted); }
     int fill=getenv("PIN_FILL")?atoi(getenv("PIN_FILL")):0;
 #ifdef COLI_CUDA
     if(!getenv("PIN_FILL")&&g_cuda_release_host) fill=1;
@@ -7779,11 +7793,7 @@ int main(int argc, char **argv){
     g_idot = getenv("IDOT")?atoi(getenv("IDOT")):1;        /* 0 = kernel f32 esatti (A/B) */
     g_spec_pin = getenv("SPEC_PIN")?atoi(getenv("SPEC_PIN")):1; /* #163: 0 = gate S-dipendenti storici / legacy S-dependent gates */
     corpus_load();                                       /* COLI_DRAFT_CORPUS: external draft source */
-    if(getenv("ROUTE_TRACE")&&*getenv("ROUTE_TRACE")){
-        g_route_fp=fopen(getenv("ROUTE_TRACE"),"w");
-        if(!g_route_fp) fprintf(stderr,"[ROUTE_TRACE] cannot open %s\n",getenv("ROUTE_TRACE"));
-        else fprintf(stderr,"[ROUTE_TRACE] logging routing to %s\n",getenv("ROUTE_TRACE"));
-    }
+    rt_trace_open();                     /* same place as before, so the log order is identical */
     g_repin = getenv("REPIN")?atoi(getenv("REPIN")):0;     /* RFC: re-pin ogni n token emessi (0=off) / live re-pin every n emitted tokens (0=off) */
     g_absorb = getenv("ABSORB")?atoi(getenv("ABSORB")):-1; /* -1 auto: assorbita per S<=4 */
     g_dsa_force = getenv("DSA_FORCE")?atoi(getenv("DSA_FORCE")):0;
@@ -7990,6 +8000,7 @@ int main(int argc, char **argv){
      * Va PRIMA di cap_for_ram: i pinnati contano nel residente. */
     if(getenv("PIN")){
         const char *pin=getenv("PIN"); char pauto[2100];
+        int pin_named=strcmp(pin,"auto")!=0;   /* typed by the user, vs auto-discovered */
         if(!strcmp(pin,"auto")){
             /* PIN=auto: la storia VIVA <SNAP>/.coli_usage (appesa a ogni turno) batte il
              * profilo congelato stats.txt — il pin di ogni riavvio riflette il carico reale
@@ -8008,7 +8019,7 @@ int main(int argc, char **argv){
         }
         if(pin){
             const char *pin_gb=getenv("PIN_GB");
-            pin_load(&m,pin,pin_gb&&!strcmp(pin_gb,"all")?-1.0:pin_gb?atof(pin_gb):10.0);   /* PIN_GB=all (#80) */
+            pin_load(&m,pin,pin_gb&&!strcmp(pin_gb,"all")?-1.0:pin_gb?atof(pin_gb):10.0,pin_named);   /* PIN_GB=all (#80) */
         }
     }
     if(getenv("COUPLE")&&*getenv("COUPLE")){    /* coupling-scored cross-layer prefetch (#176) */
@@ -8033,7 +8044,7 @@ int main(int argc, char **argv){
            * qualche ora di chat) arriva a meta' del budget expert. */
           double conf = (double)hist/200000.0; if(conf>1) conf=1;
           double pin_gb = expert_avail(&m,ram_env,ebits,est_ctx)*0.5*conf/1e9;
-          if(pin_gb>=0.5) pin_load(&m, g_usage_path, pin_gb);
+          if(pin_gb>=0.5) pin_load(&m, g_usage_path, pin_gb, 0);   /* auto-discovered: not trusted */
       }
       /* SEMPRE: senza clamp la LRU cresce fino a cap*76 layer = decine di GB -> OOM-kill.
        * RAM_GB assente o <=0 = budget automatico da MemAvailable. */

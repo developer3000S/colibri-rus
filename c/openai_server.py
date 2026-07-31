@@ -745,7 +745,7 @@ def anthropic_to_openai(body):
             raise APIError(400, "Each message must be an object.", f"messages.{index}")
         role = message.get("role")
         if role not in ("user", "assistant"):
-            raise APIError(400, f"Unsupported message role: {role!r}. Anthropic messages are "
+            raise APIError(400, f"Input message role {role!r} is not supported. Anthropic messages are "
                            "`user` or `assistant`; a system prompt goes in the top-level `system`.",
                            f"messages.{index}.role", "unsupported_role")
         content = message.get("content")

@@ -14,7 +14,7 @@ Run GLM-5.2 (744B) locally on CPU with roughly 15-26 GB of RAM.
   coli build                build the engine
 
 Configuration through environment variables or flags (also valid after the subcommand):
-  COLI_MODEL=<dir>   model directory (default /home/vincenzo/glm52_i4)
+  COLI_MODEL=<dir>   model directory (required; or pass --model <dir>)
   COLI_MODEL_MIRROR=<dir>  second copy of the model on another drive: expert reads
                      are split across both SSDs (COLI_DISK_WEIGHTS=9,3 sets the
                      primary,mirror bandwidth ratio; default: measured at startup)
@@ -85,7 +85,11 @@ else:
     TOOLS = os.path.join(_LIBEXEC, "tools")
     sys.path.insert(0, _LIBEXEC)   # so `import resource_plan`, `doctor`, `openai_server` still resolve
 
-DEF_MODEL = os.environ.get("COLI_MODEL", "/home/vincenzo/glm52_i4")
+# No invented default: a path from whoever's machine this was written on is worse than
+# no path at all, because every downstream error then names a directory the user never
+# chose and cannot act on (#724). None here, and each command says so in its own voice.
+DEF_MODEL = os.environ.get("COLI_MODEL")
+NO_MODEL_HINT = "pass --model <dir>, or set COLI_MODEL=<dir>"
 END   = b"\x01\x01END\x01\x01\n"
 READY = b"\x01\x01READY\x01\x01\n"
 
@@ -173,6 +177,8 @@ def engine_for(model):
     return local if os.path.exists(local) else os.path.join(_LIBEXEC, name + _EXE)
 
 def need_model(model, engine=None):
+    if not model:
+        sys.exit(f"{C.yel}no model directory given.{C.r}\n  {NO_MODEL_HINT}")
     if not os.path.isdir(model):
         sys.exit(f"{C.yel}model not found:{C.r} {model}\n  set COLI_MODEL or use --model")
     if not os.path.exists(os.path.join(model,"tokenizer.json")):
@@ -529,6 +535,8 @@ def cmd_build(a):
 
 def cmd_info(a):
     banner("info")
+    if not a.model:
+        sys.exit(f"{C.yel}no model directory given.{C.r}\n  {NO_MODEL_HINT}")
     cfgp=os.path.join(a.model,"config.json")
     def row(k,v): print(f"   {C.gray}{k:<10}{C.r} {v}")
     if os.path.exists(cfgp):
@@ -562,6 +570,8 @@ def cmd_info(a):
 
 def cmd_plan(a):
     from resource_plan import build_plan, format_plan
+    if not a.model:
+        sys.exit(f"{C.yel}no model directory given.{C.r}\n  {NO_MODEL_HINT}")
     try:
         ram,ctx,devices,vram=resource_request(a,os.environ)
         if ctx<1: raise ValueError("--ctx must be positive")
@@ -579,12 +589,15 @@ def cmd_plan(a):
 def cmd_doctor(a):
     from doctor import exit_code, format_doctor, run_doctor
     try:
+        # doctor reports rather than exits, so a missing model is a failed check and not
+        # a sys.exit like everywhere else — it is exactly the thing doctor exists to say.
+        if not a.model: raise ValueError(f"no model directory given: {NO_MODEL_HINT}")
         ram,ctx,devices,vram=resource_request(a,os.environ)
         if ctx<1: raise ValueError("--ctx must be positive")
         if ram<0: raise ValueError("--ram cannot be negative")
         if vram<0: raise ValueError("--vram cannot be negative")
     except ValueError as error:
-        report={"schema_version":1,"status":"error","model":os.path.abspath(a.model),
+        report={"schema_version":1,"status":"error","model":os.path.abspath(a.model) if a.model else None,
                 "mode":"deep" if a.deep else "standard",
                 "checks":[{"id":"config.arguments","status":"fail","summary":str(error)}],
                 "plan":None}
@@ -1021,6 +1034,11 @@ def cmd_bench(a):
 
 def cmd_convert(a):
     banner("convert")
+    # here --model is the DESTINATION the converted weights are written to, not an
+    # existing snapshot, so it needs its own wording rather than need_model's.
+    if not a.model:
+        sys.exit(f"{C.yel}no output directory given.{C.r}\n"
+                 f"  --model <dir> is where the converted model is written")
     # python con torch/safetensors: l'ambiente del progetto se c'e', altrimenti quello corrente
     venv_py = os.path.join(HERE, "mio_env", "Scripts" if sys.platform == "win32" else "bin", "python3")
     py = venv_py if os.path.exists(venv_py) else sys.executable

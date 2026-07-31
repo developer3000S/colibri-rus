@@ -563,7 +563,8 @@ def run_doctor(model, ram_gb=0, context=4096, gpu_indices=None, vram_gb=0, *,
 
 def format_doctor(report):
     icons = {"pass": "ok", "warn": "warn", "fail": "fail", "skip": "skip"}
-    lines = [f"colibri doctor · {report['model']}"]
+    # model is null in the JSON when none was given (#724); say that rather than "None"
+    lines = [f"colibri doctor · {report['model'] or '(no model given)'}"]
     for check in report["checks"]:
         lines.append(f"[{icons[check['status']]:>4}] {check['id']:<18} {check['summary']}")
     if report["plan"]:

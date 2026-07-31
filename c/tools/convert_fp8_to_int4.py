@@ -23,7 +23,7 @@ USO:
   # selftest del dequant fp8 (richiede torch)
   python3 tools/convert_fp8_to_int4.py --selftest
   # reale: scarica+converte+cancella shard per shard
-  python3 tools/convert_fp8_to_int4.py --repo zai-org/GLM-5.2-FP8 --outdir /home/vincenzo/glm52_i4
+  python3 tools/convert_fp8_to_int4.py --repo zai-org/GLM-5.2-FP8 --outdir /path/to/glm52_i4
 """
 import os, sys, glob, json, shutil, argparse
 import numpy as np

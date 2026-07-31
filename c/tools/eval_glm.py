@@ -15,12 +15,12 @@ USO:
   # 1) (una volta, quando hai rete) scarica i benchmark in ./bench/*.jsonl
   python3 tools/fetch_benchmarks.py --out ./bench --tasks hellaswag,arc_challenge,mmlu --limit 200
   # 2) plumbing test della meccanica (senza motore):
-  python3 tools/eval_glm.py --snap /home/vincenzo/glm52_i4 --data ./bench --tasks smoke --dry
+  python3 tools/eval_glm.py --snap /path/to/glm52_i4 --data ./bench --tasks smoke --dry
   # 3) validazione vera quando il modello e' pronto:
-  python3 tools/eval_glm.py --snap /home/vincenzo/glm52_i4 --data ./bench \
+  python3 tools/eval_glm.py --snap /path/to/glm52_i4 --data ./bench \
                       --tasks hellaswag,arc_challenge,mmlu --limit 40 --ram 15
   # leve di ricerca: passate al motore via env
-  TOPP=0.9 python3 tools/eval_glm.py --snap /home/vincenzo/glm52_i4 --data ./bench --tasks mmlu --ram 15
+  TOPP=0.9 python3 tools/eval_glm.py --snap /path/to/glm52_i4 --data ./bench --tasks mmlu --ram 15
 """
 import os, sys, subprocess, argparse, random, json, tempfile, time, threading
 

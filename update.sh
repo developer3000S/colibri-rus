@@ -31,28 +31,6 @@ echo "[3/4] Pushing data to GitHub (branch main)..."
 git gc --auto > /dev/null 2>&1
 git push origin main --no-thin
 
-# 4. Rebuild frontend
-echo "[4/4] Rebuild frontend ..."
-cd app/frontend
-# npm install --no-bin-links
-# npm audit fix --force
-mkdir -p node_modules/.bin
-# Create wrapper scripts for binaries (exfat doesn't support symlinks)
-cat > node_modules/.bin/vite << 'WRAPPER'
-#!/usr/bin/env node
-import('../vite/bin/vite.js')
-WRAPPER
-chmod +x node_modules/.bin/vite
-cat > node_modules/.bin/tauri << 'WRAPPER'
-#!/usr/bin/env node
-require('../@tauri-apps/cli/tauri.js')
-WRAPPER
-chmod +x node_modules/.bin/tauri
-# npm run build
-cd ../..
-./scripts/rebuild.sh 
-
-if [ $? -eq 0 ]; then
     echo "--- Success: Repository updated! ---"
 else
     echo "--- Error: Failed to update repository. ---"

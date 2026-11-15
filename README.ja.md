@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><img src="https://img.shields.io/badge/website-justvugg.github.io%2Fcolibri-1f6feb" alt="ウェブサイト"></a>
-  <a href="https://github.com/JustVugg/colibri/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="最新リリース"></a>
+  <a href="https://github.com/Developer3000S/colibri-rus/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="最新リリース"></a>
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ $ ./coli chat
 
 ```bash
 sudo apt install git python3 build-essential
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -57,7 +57,7 @@ cd colibri
 ```bash
 xcode-select --install
 brew install libomp git python
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -104,13 +104,13 @@ Starting colibri
 | `needs N GB free for the download` | `--dir` で、より大きなディスク上のフォルダーを指定する |
 | WSL で、モデルのフォルダーが `/mnt/c` の下にある | Linux 側のディスク（デフォルトの `~/colibri-models`）に置く：`/mnt/c` は何倍も遅くなります |
 | チェックアウトを更新した（`git pull`） | `./start-here.sh` をもう一度実行してください。ソースが変わっていればエンジンを再ビルドしてから起動します |
-| それ以外 | `c/coli logs -n 50` でバックグラウンドで起動したサーバーのログを（フォアグラウンドで起動したサーバーは自分のターミナルに出力します）、`c/coli logs --install` でセットアップのログを表示できます。セットアップが最後に表示した数行を添えて [issue](https://github.com/JustVugg/colibri/issues) を作成してください |
+| それ以外 | `c/coli logs -n 50` でバックグラウンドで起動したサーバーのログを（フォアグラウンドで起動したサーバーは自分のターミナルに出力します）、`c/coli logs --install` でセットアップのログを表示できます。セットアップが最後に表示した数行を添えて [issue](https://github.com/Developer3000S/colibri-rus/issues) を作成してください |
 
 ### AI アシスタントにセットアップしてもらう
 
 AI コーディングアシスタントを使っているなら、これをすべて任せられます。次のように頼んでください：
 
-> https://github.com/JustVugg/colibri の docs/AI_SETUP.md に従って、このマシンに colibri をセットアップしてください
+> https://github.com/Developer3000S/colibri-rus の docs/AI_SETUP.md に従って、このマシンに colibri をセットアップしてください
 
 [docs/AI_SETUP.md](docs/AI_SETUP.md) は、各ステップを機械可読な結果を返すコマンドとしてアシスタントに渡し、モデルをダウンロードしたりシステムパッケージをインストールしたりする前に、あなたに確認するよう指示しています。Model Context Protocol に対応したアシスタントは、代わりに colibri の MCP サーバーを使えます：`coli mcp` は、ハードウェアの検出、モデルの推奨、インストール、起動、停止、状態確認のためのツールを提供します（[docs/MCP_SERVER.md](docs/MCP_SERVER.md)）。
 
@@ -234,7 +234,7 @@ Mixture-of-Experts モデルは、ディスク上では巨大でも、1 トー�
 
 **GPU のオンとオフ。** `coli setup --backend vulkan` はどのモデルでも GPU を使い、`coli setup --backend cpu`（または `--no-gpu`）はすべてを CPU で動かします。Vulkan 付きでビルドしたエンジンが GPU を使うのは、`coli chat`、`serve`、`web` の環境に `COLI_VULKAN=1` があるときだけです（セットアップが Vulkan を選んだときは自動で設定します）。なければ CPU で動きます。GPU がオンのとき、`COLI_VK_CHAIN=0` はエキスパートの層 (tier) をそのままにして、密な層を CPU で動かします。内蔵 GPU では両方試してください：Intel Iris Xe（Core i7-1355U）のノートパソコンでは、Qwen3.6 のデコードは CPU で 2.1 tok/s、Vulkan で 1.7〜1.9、密チェーンをオフにして 2.1 でした。
 
-ディスクリート GPU では、セットアップはすべてのエンジンを Vulkan 付きでビルドし（エンジンに CUDA の経路があり、ツールキットが入っていれば CUDA を優先）、密レイヤーはカード上に置きます。これが本来想定しているケースです。RTX PRO 4000（24 GB、マシン D）では Qwen3.6-35B-A3B のデコードが 92.9 tok/s、プロンプト読み込みが 2,076、OLMoE は 299.4 と 6,867 です（[表](#three-backends-on-one-machine)）。カードより大きなモデルは、カードに載らないエキスパートを RAM 上のホストプールに置き、各ステップでカードが自分の分を計算する間に CPU がそれらを同じフレームの中で計算します。Qwen3.8-Flash-Next IQ2_XS（68 GB）はそこで 50.6 tok/s でデコードします（[vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)）。あるユーザーは Tesla V100 16 GB で Qwen3.6 を 17〜19 tok/s と計測しました（[#1852](https://github.com/JustVugg/colibri/issues/1852)）。あなたのカードの数値も歓迎します。
+ディスクリート GPU では、セットアップはすべてのエンジンを Vulkan 付きでビルドし（エンジンに CUDA の経路があり、ツールキットが入っていれば CUDA を優先）、密レイヤーはカード上に置きます。これが本来想定しているケースです。RTX PRO 4000（24 GB、マシン D）では Qwen3.6-35B-A3B のデコードが 92.9 tok/s、プロンプト読み込みが 2,076、OLMoE は 299.4 と 6,867 です（[表](#three-backends-on-one-machine)）。カードより大きなモデルは、カードに載らないエキスパートを RAM 上のホストプールに置き、各ステップでカードが自分の分を計算する間に CPU がそれらを同じフレームの中で計算します。Qwen3.8-Flash-Next IQ2_XS（68 GB）はそこで 50.6 tok/s でデコードします（[vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)）。あるユーザーは Tesla V100 16 GB で Qwen3.6 を 17〜19 tok/s と計測しました（[#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)）。あなたのカードの数値も歓迎します。
 
 **Resizable BAR のないカード** でも動くようになりました。そうしたカード（すべての Turing カード、発売時のファームウェアのままの Ampere カード、このオプションを無効にした古い AMD カード）では、CPU がカードのメモリに直接書き込めるのは約 256 MB だけです。colibri は現在、ステージングバッファを通して重みを自動でコピーします。この経路は、強制的に使わせる方法と、3 つのデバイスで小さなウィンドウをエミュレートする方法でテストされており、780M では計測できるほどのコストはありません。ただし、Resizable BAR のないカードではまだ計測されていません（[vulkan.md](docs/vulkan.md#memory-placement-without-resizable-bar)）。
 
@@ -249,7 +249,7 @@ CUDA ツールキットがインストールされていれば、セットアッ
 - **GGUF のブロックをカード上で**（`cuda_bd.cuh`）：32 重み以上のすべての ggml ブロック型を、ファイルの行のまま扱います。プロンプトはテンソルコアを通ります（[gguf.md](docs/gguf.md)）。
 - **VRAM エキスパートティア** は、計測されたルーティングから選んだ最もホットなエキスパートをカード上に置きます。ミスしたエキスパートは同時に CPU で計算されます。8 GB のカード 2 枚（RTX 3070 と Quadro RTX 4000）での Qwen3.6 は、履歴が温まった状態で 11.3 tok/s でデコードしました（[qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md)）。全エキスパートを常駐させた RTX 5090 6 枚での GLM-5.2 は 9.0-9.2 tok/s（[benchmarks.md](docs/benchmarks.md)）。RTX 5080 での DeepSeek V4 Flash は 1.5-1.6 tok/s で、3,324 トークンのプロンプトを 90 秒で処理しました（[deepseek-v4.md](docs/deepseek-v4.md)）。
 - **Qwen3.6 の新機能：DeltaNet レイヤーをカード上で実行**（`Q36_DN_GPU=1`、オプトイン）。これまで Qwen3.6 の 30 個の DeltaNet レイヤーはそれぞれ、1 トークンごとに 4 回、カードと CPU の間でデータをコピーしていました。現在はデコード時の 1 トークンがレイヤー全体をカード上で実行し、そのリカレント状態は VRAM に保持されます。密レイヤーを VRAM に置いた RTX 3070 で：25.4 から 30.0 tok/s に向上しました（[qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md#the-deltanet-layer-on-the-card-q36_dn_gpu1)）。
-- **古いカード。** CUDA ツールキットがもうあなたのカード向けにコンパイルできない場合（[#1852](https://github.com/JustVugg/colibri/issues/1852) の CUDA 13 と V100 の例）、セットアップはビルドの前にそれを見抜き、理由を示してカードを Vulkan 経由で使います。CUDA 12.x ツールキットがあれば CUDA の経路が戻ります。DeepSeek V4 の CUDA ティアは Pascal と Turing 向けにもビルドできます（`CUDA_ARCH=portable-pre-ampere NO_TC=1`）。
+- **古いカード。** CUDA ツールキットがもうあなたのカード向けにコンパイルできない場合（[#1852](https://github.com/Developer3000S/colibri-rus/issues/1852) の CUDA 13 と V100 の例）、セットアップはビルドの前にそれを見抜き、理由を示してカードを Vulkan 経由で使います。CUDA 12.x ツールキットがあれば CUDA の経路が戻ります。DeepSeek V4 の CUDA ティアは Pascal と Turing 向けにもビルドできます（`CUDA_ARCH=portable-pre-ampere NO_TC=1`）。
 
 すべての詳細：[docs/cuda.md](docs/cuda.md)。
 
@@ -343,7 +343,7 @@ curl -s http://127.0.0.1:8000/v1/systemone -H 'Content-Type: application/json' -
   <img src="docs/media/tiers.png" width="880" alt="エキスパート常駐の 3 つのティアとしての VRAM、RAM、NVMe">
 </p>
 
-- **重みのための JIT。** コンパイラの JIT はプログラム全体をコンパイルすることはなく、実際に実行される部分を観察して、ホットパスをコンパイルします。colibri は重みについて同じ賭けをします。計測されたルーティングの熱量が、どのエキスパートに VRAM、RAM、ディスクのどれを割り当てるかを決めます：レイヤーごとの LRU キャッシュに加えて、あなた自身の会話から学習したピン留めのホットセット（`.coli_usage`、ターンごとに更新）があります。colibri は使えば使うほど速くなります。これが機能するのは、ルーティングに計測可能な構造があるからです（[エキスパートアトラス](https://github.com/JustVugg/colibri/issues/175)）。
+- **重みのための JIT。** コンパイラの JIT はプログラム全体をコンパイルすることはなく、実際に実行される部分を観察して、ホットパスをコンパイルします。colibri は重みについて同じ賭けをします。計測されたルーティングの熱量が、どのエキスパートに VRAM、RAM、ディスクのどれを割り当てるかを決めます：レイヤーごとの LRU キャッシュに加えて、あなた自身の会話から学習したピン留めのホットセット（`.coli_usage`、ターンごとに更新）があります。colibri は使えば使うほど速くなります。これが機能するのは、ルーティングに計測可能な構造があるからです（[エキスパートアトラス](https://github.com/Developer3000S/colibri-rus/issues/175)）。
 - **ディスクを二度待たない。** エキスパートの 3 つの行列は 1 回の `pread` で読み込まれます。ローダーのプールが、常駐エキスパートが計算している間に、欠けているエキスパートを読み込みます。複数の位置をまとめたバッチでは、各エキスパートを 1 回だけ読みます。ルーター先読みスレッドが次のレイヤーをプリフェッチできます（GLM-5.2 のルーティングは 1 レイヤー先を 71.6% 予測できます）。`DIRECT=1`（O_DIRECT）は高速な NVMe ドライブでは大きな改善になることが多い一方、ほかのドライブでは効果がないか逆効果になります：自分のドライブで計測してください（[tuning.md](docs/tuning.md)）。
 - **複数の SSD。** `COLI_MODEL_MIRROR=/second/glm52_i4 ./coli chat --model /fast/glm52_i4` は、2 台目のドライブにあるコピーから読み込みます。独立したコントローラに接続された NVMe ドライブ 2 台で、デコード +37.5% を計測しました。より小さなドライブ上の部分ミラーでも動作します（[multidisk.md](docs/multidisk.md)）。
 - **ラップトップからラックまで。** 25 GB のラップトップでは、すべてのエキスパートがディスクからストリーミングされ、遅いながらも正しく動きます。大きなホストではすべてのエキスパートが常駐し（`CUDA_EXPERT_GB=auto PIN_GB=all`）、ディスクはデコードから外れます。`COLI_NUMA=1` はマルチソケットのホストで、常駐する重みを複数のメモリコントローラに分散させます。ローカルクラスタモードは、ルーティングされるエキスパートをほかのマシンで実行します（[cluster.md](docs/cluster.md)）。
@@ -364,8 +364,8 @@ curl -s http://127.0.0.1:8000/v1/systemone -H 'Content-Type: application/json' -
 同じエンジン、同じ int4 コンテナです：ハードウェアが変えるのはエキスパートの置き場所だけです。GLM-5.2 のデコード速度を[完全な表](docs/benchmarks.md)から抜粋します：
 
 - **6x RTX 5090、全エキスパート常駐：** 5.8-6.8 tok/s、選択的な NUMA インターリーブで 9.0-9.2（[実験ログ](docs/experiments/glm52-6x5090-2026-07-12.md)）。
-- **128 GB、CPU のみ**（Ryzen AI Max+ 395）：ウォーム時 1.83 tok/s（[#200](https://github.com/JustVugg/colibri/issues/200)）。
-- **RTX 5070 Ti 1 枚のラップトップ級マシン：** 1.07 tok/s（[#273](https://github.com/JustVugg/colibri/issues/273)）。
+- **128 GB、CPU のみ**（Ryzen AI Max+ 395）：ウォーム時 1.83 tok/s（[#200](https://github.com/Developer3000S/colibri-rus/issues/200)）。
+- **RTX 5070 Ti 1 枚のラップトップ級マシン：** 1.07 tok/s（[#273](https://github.com/Developer3000S/colibri-rus/issues/273)）。
 - **このプロジェクトが始まった 25 GB のラップトップ：** コールド時 0.05-0.1 tok/s。偽りのない下限です。
 
 <a id="three-backends-on-one-machine"></a>
@@ -414,17 +414,17 @@ RAM 62 GB の i5-13500 と RTX PRO 4000 Blackwell SFF（24 GB、70 W）。各モ
 
 <a id="1-get-colibri"></a>
 
-**1. プログラム。** [Releases](https://github.com/JustVugg/colibri/releases) から自分のプラットフォーム用のアーカイブ（Linux x86_64、macOS、Windows。コンパイラは不要で、必要なのはランチャーと API のための [Python 3](https://www.python.org/downloads/) だけ）を取得して展開し、`python3 coli info` を実行します。Linux と Windows のエンジンには Vulkan が組み込まれ（`shaders/` が隣にあります）、macOS のエンジンには Metal が組み込まれています。Windows で NVIDIA のカードを使うなら、CUDA のアーカイブも追加してください。または、`gcc`（または clang）と OpenMP を使ってソースからビルドします：
+**1. プログラム。** [Releases](https://github.com/Developer3000S/colibri-rus/releases) から自分のプラットフォーム用のアーカイブ（Linux x86_64、macOS、Windows。コンパイラは不要で、必要なのはランチャーと API のための [Python 3](https://www.python.org/downloads/) だけ）を取得して展開し、`python3 coli info` を実行します。Linux と Windows のエンジンには Vulkan が組み込まれ（`shaders/` が隣にあります）、macOS のエンジンには Metal が組み込まれています。Windows で NVIDIA のカードを使うなら、CUDA のアーカイブも追加してください。または、`gcc`（または clang）と OpenMP を使ってソースからビルドします：
 
 ```bash
-git clone https://github.com/JustVugg/colibri && cd colibri/c
+git clone https://github.com/Developer3000S/colibri-rus && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1 for CUDA)
 ```
 
 <a id="2-get-the-model"></a>
 
-**2. モデル。** [上の表](#which-model-for-my-machine)にあるどのダウンロードでもかまいません：セットアップの ID は Hugging Face のリポジトリに対応しており、各モデルのページにダウンロードと変換のコマンドがあります。GLM-5.2 には、int8 MTP ヘッド付きのグループスケール（gs64）コンテナ [`mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp`](https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp)（429 GB）を、GLM-5.3 には [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)（419 GB、MTP ヘッドなし）を使ってください。古い行単位 int4 のミラーは使わないでください：品質が約 9 ポイント劣ることが計測されており、[#455](https://github.com/JustVugg/colibri/issues/455) のループする回答の原因でした。`./coli convert --model /nvme/glm52_i4` は、FP8 リリースから同じコンテナをシャードごとに作成するので、756 GB 全体を一度にディスクに置く必要はありません。MTP ヘッドなどの確認方法：[quickstart.md](docs/quickstart.md#3-get-the-model)。手元にある GGUF は変換不要です：最初のファイルに `./coli import`（[上記](#from-a-gguf)）。
+**2. モデル。** [上の表](#which-model-for-my-machine)にあるどのダウンロードでもかまいません：セットアップの ID は Hugging Face のリポジトリに対応しており、各モデルのページにダウンロードと変換のコマンドがあります。GLM-5.2 には、int8 MTP ヘッド付きのグループスケール（gs64）コンテナ [`mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp`](https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp)（429 GB）を、GLM-5.3 には [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)（419 GB、MTP ヘッドなし）を使ってください。古い行単位 int4 のミラーは使わないでください：品質が約 9 ポイント劣ることが計測されており、[#455](https://github.com/Developer3000S/colibri-rus/issues/455) のループする回答の原因でした。`./coli convert --model /nvme/glm52_i4` は、FP8 リリースから同じコンテナをシャードごとに作成するので、756 GB 全体を一度にディスクに置く必要はありません。MTP ヘッドなどの確認方法：[quickstart.md](docs/quickstart.md#3-get-the-model)。手元にある GGUF は変換不要です：最初のファイルに `./coli import`（[上記](#from-a-gguf)）。
 
 <a id="3-run-it"></a>
 
@@ -456,7 +456,7 @@ colibri は、フロンティアモデルが希少なハードウェアに頼る
 | ルーティングを考慮した投機的デコードは、ほぼ完全常駐に達する前でも元が取れる | MTP と文法ドラフトは動作するが、MTP はエキスパートヒット率約 85% 付近で 32% の損失も計測されている | 受理率、エキスパートヒット率、バッチの和集合、ドラフト深さにわたる損益分岐面をマッピングする |
 | CPU/GPU のオーバーラップは、ボトルネックを移すだけでなく転送と同期を隠蔽できる | CUDA、Metal、Vulkan での改善はあるが、高速な CPU、内蔵 GPU、低い常駐率ではそれが打ち消され得る | PCIe、ユニファイドメモリ、完全常駐のマシンにわたる、ステージごとのプロファイルと 1 変数ずつの A/B、そして計測済みの 1 枚（RTX PRO 4000）以外のディスクリート GPU での Vulkan のティアとチェーンの数値 |
 
-協力したいですか？いずれかの行を選び、ネガティブな結果も公開してください。ハードウェア、コミット、モデル、正確なコマンド、プロンプト、キャッシュ状態、スループット、最初のトークンまでの時間、エキスパートヒット率、読み込みバイト数、品質チェックを記録し、1 つの変数だけを変えて繰り返し、生のログを添付してください。まずは [CONTRIBUTING.md](CONTRIBUTING.md) と[ベンチマークプロトコル](docs/benchmarking.md)から始め、それから [issue を作成](https://github.com/JustVugg/colibri/issues/new)してください。ここでは、説明のつかない速い数値よりも、よく制御された失敗のほうが価値があります。
+協力したいですか？いずれかの行を選び、ネガティブな結果も公開してください。ハードウェア、コミット、モデル、正確なコマンド、プロンプト、キャッシュ状態、スループット、最初のトークンまでの時間、エキスパートヒット率、読み込みバイト数、品質チェックを記録し、1 つの変数だけを変えて繰り返し、生のログを添付してください。まずは [CONTRIBUTING.md](CONTRIBUTING.md) と[ベンチマークプロトコル](docs/benchmarking.md)から始め、それから [issue を作成](https://github.com/Developer3000S/colibri-rus/issues/new)してください。ここでは、説明のつかない速い数値よりも、よく制御された失敗のほうが価値があります。
 
 ## ドキュメント
 

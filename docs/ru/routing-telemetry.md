@@ -3,7 +3,7 @@
 
 *Каноническая ссылка на `.coli_usage` и `ROUTE_TRACE=`, а также на `route_trace.h`,
 оба заголовка реализованы. Предыстория и обсуждение дизайна в
-[#700](https://github.com/JustVugg/colibri/issues/700).*
+[#700](https://github.com/Developer3000S/colibri-rus/issues/700).*
 
 <a id="why-one-header"></a>
 ## Почему один заголовок

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><img src="https://img.shields.io/badge/website-justvugg.github.io%2Fcolibri-1f6feb" alt="网站"></a>
-  <a href="https://github.com/JustVugg/colibri/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="最新版本"></a>
+  <a href="https://github.com/Developer3000S/colibri-rus/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="最新版本"></a>
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ $ ./coli chat
 
 ```bash
 sudo apt install git python3 build-essential
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -57,7 +57,7 @@ cd colibri
 ```bash
 xcode-select --install
 brew install libomp git python
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -104,13 +104,13 @@ Starting colibri
 | `needs N GB free for the download` | 用 `--dir` 指定一个更大磁盘上的文件夹 |
 | 在 WSL 中，模型文件夹位于 `/mnt/c` 下 | 把它放在 Linux 磁盘上（即默认的 `~/colibri-models`）：`/mnt/c` 要慢很多倍 |
 | 更新了代码（`git pull`） | 重新运行 `./start-here.sh`：如果源代码有变化，它会先重新编译引擎，再启动 |
-| 其他情况 | `c/coli logs -n 50` 显示后台启动的服务器的日志（前台启动的服务器输出在它自己的终端里），`c/coli logs --install` 显示安装程序的日志；提交一个 [issue](https://github.com/JustVugg/colibri/issues)，附上安装程序最后打印的几行 |
+| 其他情况 | `c/coli logs -n 50` 显示后台启动的服务器的日志（前台启动的服务器输出在它自己的终端里），`c/coli logs --install` 显示安装程序的日志；提交一个 [issue](https://github.com/Developer3000S/colibri-rus/issues)，附上安装程序最后打印的几行 |
 
 ### 让 AI 助手帮你安装
 
 如果你在用 AI 编程助手，它可以替你完成以上所有步骤。这样告诉它：
 
-> 按照 https://github.com/JustVugg/colibri 中的 docs/AI_SETUP.md，在这台机器上安装 colibri
+> 按照 https://github.com/Developer3000S/colibri-rus 中的 docs/AI_SETUP.md，在这台机器上安装 colibri
 
 [docs/AI_SETUP.md](docs/AI_SETUP.md) 把每一步都写成一条命令，并给出机器可读的结果，还要求助手在下载模型或安装系统软件包之前先征求你的同意。支持 Model Context Protocol 的助手也可以改用 colibri 的 MCP 服务器：`coli mcp` 提供检测硬件、推荐模型、安装、启动、停止和检查的工具（[docs/MCP_SERVER.md](docs/MCP_SERVER.md)）。
 
@@ -229,7 +229,7 @@ Starting colibri
 
 **开启或关闭 GPU。** `coli setup --backend vulkan` 对任何模型都使用 GPU，`coli setup --backend cpu`（或 `--no-gpu`）则全部在 CPU 上运行。用 Vulkan 编译的引擎只有在 `coli chat`、`serve` 或 `web` 的环境中有 `COLI_VULKAN=1` 时才使用 GPU（安装程序选择 Vulkan 时会自动设置）；没有它，引擎就在 CPU 上运行。GPU 开启时，`COLI_VK_CHAIN=0` 保留专家层 (tier)，让稠密层在 CPU 上运行。在集成显卡上，两种都试一试：在一台 Intel Iris Xe（Core i7-1355U）笔记本上，Qwen3.6 在 CPU 上解码 2.1 tok/s，用 Vulkan 为 1.7 到 1.9，关闭稠密链后为 2.1。
 
-在独立显卡上，安装程序会为每个引擎构建 Vulkan（若引擎有 CUDA 路径且已安装工具包，则优先 CUDA），并把稠密层放在显卡上。这正是设计所针对的场景。在 RTX PRO 4000（24 GB，机器 D）上，Qwen3.6-35B-A3B 的解码速度为 92.9 tok/s，读取提示词为 2,076，OLMoE 为 299.4 和 6,867（[表格](#three-backends-on-one-machine)）。比显卡更大的模型会把显卡放不下的专家放在内存中的主机池里，每一步由 CPU 计算这些专家，同时显卡计算它自己的，在同一帧内完成：Qwen3.8-Flash-Next IQ2_XS（68 GB）在这里的解码速度为 50.6 tok/s（[vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)）。一位用户在 Tesla V100 16 GB 上测得 Qwen3.6 为 17 到 19 tok/s（[#1852](https://github.com/JustVugg/colibri/issues/1852)）。欢迎提供你的显卡的数据。
+在独立显卡上，安装程序会为每个引擎构建 Vulkan（若引擎有 CUDA 路径且已安装工具包，则优先 CUDA），并把稠密层放在显卡上。这正是设计所针对的场景。在 RTX PRO 4000（24 GB，机器 D）上，Qwen3.6-35B-A3B 的解码速度为 92.9 tok/s，读取提示词为 2,076，OLMoE 为 299.4 和 6,867（[表格](#three-backends-on-one-machine)）。比显卡更大的模型会把显卡放不下的专家放在内存中的主机池里，每一步由 CPU 计算这些专家，同时显卡计算它自己的，在同一帧内完成：Qwen3.8-Flash-Next IQ2_XS（68 GB）在这里的解码速度为 50.6 tok/s（[vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)）。一位用户在 Tesla V100 16 GB 上测得 Qwen3.6 为 17 到 19 tok/s（[#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)）。欢迎提供你的显卡的数据。
 
 **没有 Resizable BAR 的显卡**现在也能用了。这类显卡（所有 Turing 显卡、使用首发固件的 Ampere 显卡、关闭了该选项的较旧 AMD 显卡）只允许 CPU 直接写入其显存中约 256 MB 的部分；colibri 现在会自动通过一个暂存缓冲区（staging buffer）把权重复制进去。这条路径已通过强制启用以及在三种设备上模拟小窗口进行了测试，在 780M 上没有可测量的开销；尚未在真正没有 Resizable BAR 的显卡上实测（[vulkan.md](docs/vulkan.md#memory-placement-without-resizable-bar)）。
 
@@ -244,7 +244,7 @@ CI 在软件驱动上将每个引擎的 Vulkan 路径与 CPU 的 token 对照检
 - **GGUF 的块在显卡上**（`cuda_bd.cuh`）：每种 32 个权重及以上的 ggml 块类型，每一行都保持文件中的样子；提示词经过张量核心（[gguf.md](docs/gguf.md)）。
 - **显存专家层级**把最热的专家放在显卡上，这些专家根据实测路由选出；未命中的专家同时在 CPU 上计算。Qwen3.6 在两张 8 GB 显卡（RTX 3070 和 Quadro RTX 4000）上、有热的路由历史时，解码速度为 11.3 tok/s（[qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md)）；GLM-5.2 在六张 RTX 5090 上、全部专家常驻时为 9.0-9.2 tok/s（[benchmarks.md](docs/benchmarks.md)）；DeepSeek V4 Flash 在一张 RTX 5080 上为 1.5-1.6 tok/s，3,324 个 token 的提示词用时 90 秒（[deepseek-v4.md](docs/deepseek-v4.md)）。
 - **Qwen3.6 新功能：DeltaNet 层放在显卡上**（`Q36_DN_GPU=1`，需手动开启）。以前，Qwen3.6 的 30 个 DeltaNet 层中，每一层对每个 token 都要在显卡和 CPU 之间复制四次数据；现在，解码一个 token 时整个层都在显卡上运行，其循环状态保留在显存中。在 RTX 3070 上、稠密层位于显存时：从 25.4 提升到 30.0 tok/s（[qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md#the-deltanet-layer-on-the-card-q36_dn_gpu1)）。
-- **较旧的显卡。** 如果 CUDA toolkit 已不再支持为你的显卡编译（例如 CUDA 13 与 V100，见 [#1852](https://github.com/JustVugg/colibri/issues/1852)），安装程序会在编译之前就发现这一点，并说明原因，转而通过 Vulkan 使用这张显卡；装上 CUDA 12.x toolkit 可以恢复 CUDA 路径。DeepSeek V4 的 CUDA 层级也可以为 Pascal 和 Turing 编译（`CUDA_ARCH=portable-pre-ampere NO_TC=1`）。
+- **较旧的显卡。** 如果 CUDA toolkit 已不再支持为你的显卡编译（例如 CUDA 13 与 V100，见 [#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)），安装程序会在编译之前就发现这一点，并说明原因，转而通过 Vulkan 使用这张显卡；装上 CUDA 12.x toolkit 可以恢复 CUDA 路径。DeepSeek V4 的 CUDA 层级也可以为 Pascal 和 Turing 编译（`CUDA_ARCH=portable-pre-ampere NO_TC=1`）。
 
 全部内容：[docs/cuda.md](docs/cuda.md)。
 
@@ -337,7 +337,7 @@ curl -s http://127.0.0.1:8000/v1/systemone -H 'Content-Type: application/json' -
   <img src="docs/media/tiers.png" width="880" alt="显存、内存与 NVMe：专家驻留的三个层级">
 </p>
 
-- **权重的 JIT。** 编译器的 JIT 从不编译整个程序：它观察实际运行的部分，只编译热点路径。colibri 对权重下了同样的赌注。实测的路由热度决定哪些专家配得上显存、内存或磁盘：一个逐层的 LRU 缓存，加上一个从你自己的对话中学到的固定热门集合（`.coli_usage`，每轮更新）。colibri 越用越快。之所以可行，是因为路由具有可测量的结构（见[专家图谱](https://github.com/JustVugg/colibri/issues/175)）。
+- **权重的 JIT。** 编译器的 JIT 从不编译整个程序：它观察实际运行的部分，只编译热点路径。colibri 对权重下了同样的赌注。实测的路由热度决定哪些专家配得上显存、内存或磁盘：一个逐层的 LRU 缓存，加上一个从你自己的对话中学到的固定热门集合（`.coli_usage`，每轮更新）。colibri 越用越快。之所以可行，是因为路由具有可测量的结构（见[专家图谱](https://github.com/Developer3000S/colibri-rus/issues/175)）。
 - **绝不为磁盘等待两次。** 一个专家的三个矩阵用一次 `pread` 读出；一组加载线程在常驻专家计算的同时读取缺失的专家；一批位置对每个专家只读取一次；路由前瞻线程可以预取下一层（GLM-5.2 的路由提前一层时有 71.6% 可预测）。`DIRECT=1`（O_DIRECT）在快速 NVMe 硬盘上往往收益很大，在其他硬盘上则持平甚至更差：请在你自己的硬盘上实测（[tuning.md](docs/tuning.md)）。
 - **不止一块 SSD。** `COLI_MODEL_MIRROR=/second/glm52_i4 ./coli chat --model /fast/glm52_i4` 会同时从第二块硬盘上的副本读取。两块接在独立控制器上的 NVMe 硬盘实测解码速度 +37.5%；放在较小硬盘上的部分镜像也可以（[multidisk.md](docs/multidisk.md)）。
 - **从笔记本到机架。** 在 25 GB 的笔记本上，所有专家都从磁盘流式读取，慢，但结果正确；在大型主机上，所有专家都常驻（`CUDA_EXPERT_GB=auto PIN_GB=all`），磁盘完全退出解码过程。`COLI_NUMA=1` 把常驻权重分布到多路主机的各个内存控制器上，本地集群模式则可以在其他机器上运行路由专家（[cluster.md](docs/cluster.md)）。
@@ -358,8 +358,8 @@ curl -s http://127.0.0.1:8000/v1/systemone -H 'Content-Type: application/json' -
 同一个引擎，同一个 int4 容器：硬件只改变专家存放的位置。GLM-5.2 的解码速度，摘自[完整表格](docs/benchmarks.md)：
 
 - **6x RTX 5090，全部专家常驻：** 5.8-6.8 tok/s，使用选择性 NUMA 交错时为 9.0-9.2（[实验记录](docs/experiments/glm52-6x5090-2026-07-12.md)）；
-- **128 GB，仅用 CPU**（Ryzen AI Max+ 395）：热缓存时 1.83 tok/s（[#200](https://github.com/JustVugg/colibri/issues/200)）；
-- **一台配单张 RTX 5070 Ti 的笔记本级主机：** 1.07 tok/s（[#273](https://github.com/JustVugg/colibri/issues/273)）；
+- **128 GB，仅用 CPU**（Ryzen AI Max+ 395）：热缓存时 1.83 tok/s（[#200](https://github.com/Developer3000S/colibri-rus/issues/200)）；
+- **一台配单张 RTX 5070 Ti 的笔记本级主机：** 1.07 tok/s（[#273](https://github.com/Developer3000S/colibri-rus/issues/273)）；
 - **项目起步时的那台 25 GB 笔记本：** 冷启动 0.05-0.1 tok/s，这是诚实的下限。
 
 <a id="three-backends-on-one-machine"></a>
@@ -408,17 +408,17 @@ curl -s http://127.0.0.1:8000/v1/systemone -H 'Content-Type: application/json' -
 
 <a id="1-get-colibri"></a>
 
-**1. 程序。** 从 [Releases](https://github.com/JustVugg/colibri/releases) 下载对应平台的压缩包（Linux x86_64、macOS、Windows；不需要编译器，只需要供启动器和 API 使用的 [Python 3](https://www.python.org/downloads/)）并解压，然后运行 `python3 coli info`。Linux 和 Windows 的引擎内置 Vulkan（`shaders/` 就在旁边），macOS 的引擎内置 Metal；在 Windows 上使用 NVIDIA 显卡时，再加上 CUDA 压缩包。或者用 `gcc`（或 clang）和 OpenMP 从源码编译：
+**1. 程序。** 从 [Releases](https://github.com/Developer3000S/colibri-rus/releases) 下载对应平台的压缩包（Linux x86_64、macOS、Windows；不需要编译器，只需要供启动器和 API 使用的 [Python 3](https://www.python.org/downloads/)）并解压，然后运行 `python3 coli info`。Linux 和 Windows 的引擎内置 Vulkan（`shaders/` 就在旁边），macOS 的引擎内置 Metal；在 Windows 上使用 NVIDIA 显卡时，再加上 CUDA 压缩包。或者用 `gcc`（或 clang）和 OpenMP 从源码编译：
 
 ```bash
-git clone https://github.com/JustVugg/colibri && cd colibri/c
+git clone https://github.com/Developer3000S/colibri-rus && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1 for CUDA)
 ```
 
 <a id="2-get-the-model"></a>
 
-**2. 模型。** [上面表格](#which-model-for-my-machine)中的任何一个下载都可以：安装程序的 id 对应 Hugging Face 仓库，每个模型的页面都写有下载和转换命令。GLM-5.2 请使用带 int8 MTP head 的 group-scaled（gs64）容器 [`mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp`](https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp)（429 GB），GLM-5.3 则使用 [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)（419 GB，没有 MTP head）。不要使用较旧的 per-row int4 镜像：它们的质量实测低约 9 个百分点，并导致了 [#455](https://github.com/JustVugg/colibri/issues/455) 中的循环回答。`./coli convert --model /nvme/glm52_i4` 会从 FP8 发布版逐个 shard 构建同样的容器，任何时候都不需要在磁盘上同时存放全部 756 GB。如何检查 MTP head 以及其他事项：[quickstart.md](docs/quickstart.md#3-get-the-model)。已有的 GGUF 无需转换：对它的第一个文件运行 `./coli import`（[见上文](#from-a-gguf)）。
+**2. 模型。** [上面表格](#which-model-for-my-machine)中的任何一个下载都可以：安装程序的 id 对应 Hugging Face 仓库，每个模型的页面都写有下载和转换命令。GLM-5.2 请使用带 int8 MTP head 的 group-scaled（gs64）容器 [`mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp`](https://huggingface.co/mastouri/GLM-5.2-colibri-int4-g64-with-int8-mtp)（429 GB），GLM-5.3 则使用 [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)（419 GB，没有 MTP head）。不要使用较旧的 per-row int4 镜像：它们的质量实测低约 9 个百分点，并导致了 [#455](https://github.com/Developer3000S/colibri-rus/issues/455) 中的循环回答。`./coli convert --model /nvme/glm52_i4` 会从 FP8 发布版逐个 shard 构建同样的容器，任何时候都不需要在磁盘上同时存放全部 756 GB。如何检查 MTP head 以及其他事项：[quickstart.md](docs/quickstart.md#3-get-the-model)。已有的 GGUF 无需转换：对它的第一个文件运行 `./coli import`（[见上文](#from-a-gguf)）。
 
 <a id="3-run-it"></a>
 
@@ -450,7 +450,7 @@ colibri 希望前沿模型更少依赖稀缺硬件，运行成本更低。这意
 | 感知路由的推测解码能在接近全驻留之前就带来收益 | MTP 和语法草稿可用，但 MTP 在专家命中率约 85% 时也实测过 32% 的损失 | 绘制接受率、专家命中率、批次并集和草稿深度之间的盈亏平衡面 |
 | CPU/GPU 重叠能隐藏传输和同步开销，而不只是转移瓶颈 | CUDA、Metal 和 Vulkan 都有收益数据，但快速 CPU、集成显卡和低驻留率可能把收益抹平 | 在 PCIe、统一内存和全驻留机器上做逐阶段 profile 和单变量 A/B，并在已测的那一张（RTX PRO 4000）之外取得更多独立显卡上 Vulkan 层级和稠密链的数据 |
 
-想参与？任选一行，负面结果也请公开。记录硬件、commit、模型、完整命令、提示词、缓存状态、吞吐量、首 token 延迟、专家命中率、读取的字节数，以及一项质量检查；每次只改变一个变量，重复运行，并附上原始日志。先从 [CONTRIBUTING.md](CONTRIBUTING.md) 和[基准测试协议](docs/benchmarking.md)开始，然后[提交一个 issue](https://github.com/JustVugg/colibri/issues/new)。在这里，一个控制良好的失败比一个无法解释的高速数字更有价值。
+想参与？任选一行，负面结果也请公开。记录硬件、commit、模型、完整命令、提示词、缓存状态、吞吐量、首 token 延迟、专家命中率、读取的字节数，以及一项质量检查；每次只改变一个变量，重复运行，并附上原始日志。先从 [CONTRIBUTING.md](CONTRIBUTING.md) 和[基准测试协议](docs/benchmarking.md)开始，然后[提交一个 issue](https://github.com/Developer3000S/colibri-rus/issues/new)。在这里，一个控制良好的失败比一个无法解释的高速数字更有价值。
 
 ## 文档
 

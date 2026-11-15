@@ -54,7 +54,7 @@ GB = 1_000_000_000
 CONFIG_VERSION = 1
 DEFAULT_PORT = 8000
 DEFAULT_HOST = "127.0.0.1"
-RELEASES_API = "https://api.github.com/repos/JustVugg/colibri/releases"
+RELEASES_API = "https://api.github.com/repos/Developer3000S/colibri-rus/releases"
 
 
 def host_os():
@@ -633,7 +633,7 @@ def _gpu_hint(needs, hw, tc):
     if not tc.get("source_checkout"):
         # A release archive has the engines but no Makefile to rebuild them.
         hint += (" ; then run the setup from a source checkout "
-                 "(git clone https://github.com/JustVugg/colibri)")
+                 "(git clone https://github.com/Developer3000S/colibri-rus)")
     return hint
 
 

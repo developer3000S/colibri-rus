@@ -944,7 +944,7 @@ def main():
                  f"{len(all_idx)} attention layers, one MLP each, no DeltaNet."])
         lines = ["---", "tags:", "  - colibri", "  - " + cfg_full.get("model_type")] + (["  - moe"] if moe else []) + \
                 ["library_name: colibri", "---", ""] + what + \
-                ["", "Engine: https://github.com/JustVugg/colibri (c/qwen36.c, docs/qwen36.md)"]
+                ["", "Engine: https://github.com/Developer3000S/colibri-rus (c/qwen36.c, docs/qwen36.md)"]
         (out / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     elif not args.no_readme:
         lines = ["---", "tags:", "  - colibri", "  - qwen3.6", "  - qwen3.6-35b-a3b", "  - moe",
@@ -953,7 +953,7 @@ def main():
                  "Every layer (Gated-Attention + Gated DeltaNet linear_attention) carries its",
                  "MoE/MLP block. DeltaNet weights live under model.layers.{i}.linear_attn.* and are",
                  "run by the recurrent gated-delta-rule in the colibri `qwen36` engine.",
-                 "", "Engine: https://github.com/JustVugg/colibri (c/qwen36.c)"]
+                 "", "Engine: https://github.com/Developer3000S/colibri-rus (c/qwen36.c)"]
         (out / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # ---- final upload (non-stream path) + cleanup ----

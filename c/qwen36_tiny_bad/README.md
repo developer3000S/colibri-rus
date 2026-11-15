@@ -12,4 +12,4 @@ Every layer (Gated-Attention + Gated DeltaNet linear_attention) carries its
 MoE/MLP block. DeltaNet weights live under model.layers.{i}.linear_attn.* and are
 run by the recurrent gated-delta-rule in the colibri `qwen36` engine.
 
-Engine: https://github.com/JustVugg/colibri (c/qwen36.c)
+Engine: https://github.com/Developer3000S/colibri-rus (c/qwen36.c)

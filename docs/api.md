@@ -754,7 +754,7 @@ What you get is one workspace with a dock to switch page:
   and reports an entropy that says when it is not sure. Same thing as
   `POST /v1/systemone` (see [systemone.md](systemone.md));
 - **Brain**, two views. *Explore* draws the
-  [measured expert atlas](https://github.com/JustVugg/colibri/issues/175) of GLM-5.2 as a cortex with ten regions to
+  [measured expert atlas](https://github.com/Developer3000S/colibri-rus/issues/175) of GLM-5.2 as a cortex with ten regions to
   enter (publish `experts.json` from `tools/expert_atlas/analyze.py --web`).
   *Live routing* shows the model actually running: one cell per expert,
   colour = tier, brightness = routing heat, and the experts routed in each

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><img src="https://img.shields.io/badge/website-justvugg.github.io%2Fcolibri-1f6feb" alt="網站"></a>
-  <a href="https://github.com/JustVugg/colibri/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="最新版本"></a>
+  <a href="https://github.com/Developer3000S/colibri-rus/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="最新版本"></a>
 </p>
 
 <p align="center">
@@ -53,7 +53,7 @@ $ ./coli chat
 
 ```bash
 sudo apt install git python3 build-essential
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -63,7 +63,7 @@ cd colibri
 ```bash
 xcode-select --install
 brew install libomp git python
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -125,13 +125,13 @@ Starting colibri
 | `needs N GB free for the download` | 用 `--dir` 指定一個位於較大硬碟上的資料夾 |
 | 在 WSL 上，模型資料夾位於 `/mnt/c` 底下 | 把它放在 Linux 磁碟上（預設的 `~/colibri-models`）：`/mnt/c` 慢上好幾倍 |
 | 更新了程式碼（`git pull`） | 重新執行 `./start-here.sh`：如果原始碼有變動，它會先重新編譯引擎，再啟動 |
-| 其他任何問題 | `c/coli logs -n 50` 會顯示在背景啟動的伺服器日誌（在前景啟動的伺服器會輸出到它自己的終端機），`c/coli logs --install` 則顯示安裝程式的日誌；請附上安裝程式最後印出的幾行，開一個 [issue](https://github.com/JustVugg/colibri/issues) |
+| 其他任何問題 | `c/coli logs -n 50` 會顯示在背景啟動的伺服器日誌（在前景啟動的伺服器會輸出到它自己的終端機），`c/coli logs --install` 則顯示安裝程式的日誌；請附上安裝程式最後印出的幾行，開一個 [issue](https://github.com/Developer3000S/colibri-rus/issues) |
 
 ### 讓你的 AI 助手幫你安裝
 
 如果你使用 AI 程式設計助手，它可以替你完成上述所有步驟。這樣問它：
 
-> 請依照 https://github.com/JustVugg/colibri 上的 docs/AI_SETUP.md，在這台機器上安裝並設定 colibri
+> 請依照 https://github.com/Developer3000S/colibri-rus 上的 docs/AI_SETUP.md，在這台機器上安裝並設定 colibri
 
 [docs/AI_SETUP.md](docs/AI_SETUP.md) 把每個步驟都寫成一條指令交給助手，
 每條指令都會產生機器可讀的結果，並要求助手在下載模型或安裝系統套件之前先詢問你。
@@ -312,7 +312,7 @@ Qwen3.8-Flash-Next 在內建顯示晶片上開啟 Vulkan，
 兩種都試試看：在一台 Intel Iris Xe（Core i7-1355U）筆電上，Qwen3.6 在 CPU 上解碼
 2.1 tok/s，用 Vulkan 為 1.7 到 1.9，關閉稠密鏈後為 2.1。
 
-在獨立顯示卡上，安裝程式會為每個引擎建置 Vulkan（若引擎有 CUDA 路徑且已安裝工具包，則優先 CUDA），並把稠密層放在顯示卡上。這正是設計所針對的情境。在 RTX PRO 4000（24 GB，機器 D）上，Qwen3.6-35B-A3B 的解碼速度為 92.9 tok/s，讀取提示詞為 2,076，OLMoE 為 299.4 與 6,867（[表格](#three-backends-on-one-machine)）。比顯示卡更大的模型會把顯示卡放不下的專家放在記憶體中的主機池裡，每一步由 CPU 計算這些專家，同時顯示卡計算它自己的，在同一個 frame 內完成：Qwen3.8-Flash-Next IQ2_XS（68 GB）在這裡的解碼速度為 50.6 tok/s（[vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)）。一位使用者在 Tesla V100 16 GB 上測得 Qwen3.6 為 17 到 19 tok/s（[#1852](https://github.com/JustVugg/colibri/issues/1852)）。歡迎提供你的顯示卡的數據。
+在獨立顯示卡上，安裝程式會為每個引擎建置 Vulkan（若引擎有 CUDA 路徑且已安裝工具包，則優先 CUDA），並把稠密層放在顯示卡上。這正是設計所針對的情境。在 RTX PRO 4000（24 GB，機器 D）上，Qwen3.6-35B-A3B 的解碼速度為 92.9 tok/s，讀取提示詞為 2,076，OLMoE 為 299.4 與 6,867（[表格](#three-backends-on-one-machine)）。比顯示卡更大的模型會把顯示卡放不下的專家放在記憶體中的主機池裡，每一步由 CPU 計算這些專家，同時顯示卡計算它自己的，在同一個 frame 內完成：Qwen3.8-Flash-Next IQ2_XS（68 GB）在這裡的解碼速度為 50.6 tok/s（[vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)）。一位使用者在 Tesla V100 16 GB 上測得 Qwen3.6 為 17 到 19 tok/s（[#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)）。歡迎提供你的顯示卡的數據。
 
 **沒有 Resizable BAR 的顯示卡**現在也能使用。這類顯示卡（所有 Turing 顯示卡、
 使用出廠韌體的 Ampere 顯示卡、關閉此選項的較舊 AMD 顯示卡）
@@ -349,7 +349,7 @@ GPU 加總數字的順序不同，而且會把某些中間結果（activation）
   從 25.4 提升到 30.0 tok/s
   （[qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md#the-deltanet-layer-on-the-card-q36_dn_gpu1)）。
 - **較舊的顯示卡**。如果 CUDA toolkit 已不再支援為你的顯示卡編譯（例如
-  [#1852](https://github.com/JustVugg/colibri/issues/1852) 中的 CUDA 13 與 V100），
+  [#1852](https://github.com/Developer3000S/colibri-rus/issues/1852) 中的 CUDA 13 與 V100），
   安裝程式會在建置之前就先發現，並說明原因，轉而透過 Vulkan 使用這張顯示卡；
   安裝 CUDA 12.x toolkit 可以讓 CUDA 路徑恢復。
   DeepSeek V4 的 CUDA 層級也可以為 Pascal 與 Turing 建置
@@ -488,7 +488,7 @@ curl -s http://127.0.0.1:8000/v1/systemone -H 'Content-Type: application/json' -
   一個逐層的 LRU 快取，加上一組從你自己的對話中學到的固定熱門專家
   （`.coli_usage`，每一輪都會更新）。colibri 越用越快。
   之所以可行，是因為路由具有可測量的結構
-  （[專家圖譜](https://github.com/JustVugg/colibri/issues/175)）。
+  （[專家圖譜](https://github.com/Developer3000S/colibri-rus/issues/175)）。
 - **絕不為硬碟等待兩次**。一個專家的三個矩陣以一次
   `pread` 讀取；一組載入器在常駐專家運算的同時讀取缺少的專家；
   一批位置對每個專家只讀取一次；路由前瞻執行緒可以預先載入下一層
@@ -534,9 +534,9 @@ GLM-5.2 的解碼速度，取自[完整表格](docs/benchmarks.md)：
 - **6x RTX 5090，所有專家常駐**：5.8-6.8 tok/s，使用選擇性
   NUMA 交錯時為 9.0-9.2（[實驗紀錄](docs/experiments/glm52-6x5090-2026-07-12.md)）；
 - **128 GB，僅用 CPU**（Ryzen AI Max+ 395）：暖機後 1.83 tok/s
-  （[#200](https://github.com/JustVugg/colibri/issues/200)）；
+  （[#200](https://github.com/Developer3000S/colibri-rus/issues/200)）；
 - **一台搭載單張 RTX 5070 Ti 的筆電級電腦**：1.07 tok/s
-  （[#273](https://github.com/JustVugg/colibri/issues/273)）；
+  （[#273](https://github.com/Developer3000S/colibri-rus/issues/273)）；
 - **這個專案起步時的那台 25 GB 筆電**：冷啟動 0.05-0.1 tok/s，
   這是如實呈現的下限。
 
@@ -588,14 +588,14 @@ GLM-5.2 的解碼速度，取自[完整表格](docs/benchmarks.md)：
 
 <a id="1-get-colibri"></a>
 
-**1. 程式**。從 [Releases](https://github.com/JustVugg/colibri/releases)
+**1. 程式**。從 [Releases](https://github.com/Developer3000S/colibri-rus/releases)
 下載適用你平台的壓縮檔（Linux x86_64、macOS、Windows；不需要編譯器，
 只需要供啟動器與 API 使用的 [Python 3](https://www.python.org/downloads/)），
 解壓縮後執行 `python3 coli info`。Linux 與 Windows 的引擎內建 Vulkan（`shaders/` 就在旁邊），
 macOS 的引擎內建 Metal；在 Windows 上使用 NVIDIA 顯示卡時，再加上 CUDA 壓縮檔。或者使用 `gcc`（或 clang）與 OpenMP 從原始碼建置：
 
 ```bash
-git clone https://github.com/JustVugg/colibri && cd colibri/c
+git clone https://github.com/Developer3000S/colibri-rus && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1 for CUDA)
 ```
@@ -609,7 +609,7 @@ GLM-5.2 請使用帶 int8 MTP head 的 group-scaled（gs64）容器
 （429 GB），GLM-5.3 則使用 [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)
 （419 GB，不含 MTP head）。不要使用較舊的 per-row int4 鏡像：
 它們的品質實測差了約 9 個百分點，而且正是
-[#455](https://github.com/JustVugg/colibri/issues/455) 中回答不斷循環的原因。
+[#455](https://github.com/Developer3000S/colibri-rus/issues/455) 中回答不斷循環的原因。
 `./coli convert --model /nvme/glm52_i4` 會從 FP8 發布版本逐 shard 建置相同的容器，
 任何時候都不需要在硬碟上同時存放完整的 756 GB。如何檢查 MTP head 及其他項目：
 [quickstart.md](docs/quickstart.md#3-get-the-model)。已有的 GGUF 不需要轉換：對它的第一個檔案執行 `./coli import`（[見上文](#from-a-gguf)）。
@@ -657,7 +657,7 @@ colibri 希望讓前沿模型減少對稀缺硬體的依賴，並降低執行成
 確切的指令、提示、快取狀態、吞吐量、首個 token 的時間、專家命中率、
 讀取的位元組數與一項品質檢查；每次只改變一個變數，重複執行，並附上原始日誌。
 請先閱讀 [CONTRIBUTING.md](CONTRIBUTING.md) 與[基準測試規範](docs/benchmarking.md)，
-然後[開一個 issue](https://github.com/JustVugg/colibri/issues/new)。
+然後[開一個 issue](https://github.com/Developer3000S/colibri-rus/issues/new)。
 在這裡，一個控制良好的失敗，比一個無法解釋的快速數字更有價值。
 
 ## 文件

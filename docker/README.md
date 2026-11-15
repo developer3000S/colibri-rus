@@ -9,23 +9,23 @@ A simple guide to running **Colibrì**, a local inference engine based on GLM 5.
 
 ## 📋 Table of Contents
 
-* [What is Colibrì?](https://github.com/JustVugg/colibri/blob/main/docker/README.md#what-is-colibr%C3%AC)
-* [Requirements](https://github.com/JustVugg/colibri/blob/main/docker/README.md#requirements)
-    * [Hardware](https://github.com/JustVugg/colibri/blob/main/docker/README.md#hardware)
-    * [Software](https://github.com/JustVugg/colibri/blob/main/docker/README.md#software)
-* [How to get started](https://github.com/JustVugg/colibri/blob/main/docker/README.md#how-to-get-started)
-    * [Step 1: Download the model](https://github.com/JustVugg/colibri/blob/main/docker/README.md#step-2-download-the-colibr%C3%AC-dockerfile)
-    * [Step 2: Download the Colibrì Dockerfile](https://github.com/JustVugg/colibri/blob/main/docker/README.md#step-2-download-the-colibr%C3%AC-dockerfile)
-    * [Step 3: Build the Docker image](https://github.com/JustVugg/colibri/blob/main/docker/README.md#step-3-build-the-docker-image)
-    * [Step 4: Start Colibrì](https://github.com/JustVugg/colibri/blob/main/docker/README.md#step-4-start-colibr%C3%AC)
-    * [What does that command mean?](https://github.com/JustVugg/colibri/blob/main/docker/README.md#what-does-that-command-mean)
-    * [Using Colibrì](https://github.com/JustVugg/colibri/blob/main/docker/README.md#using-colibr%C3%AC)
-* [Enter the container](https://github.com/JustVugg/colibri/blob/main/docker/README.md#entering-a-linux-console-inside-the-container)
-* [Troubleshooting](https://github.com/JustVugg/colibri/blob/main/docker/README.md#troubleshooting)
-* [Technical notes](https://github.com/JustVugg/colibri/blob/main/docker/README.md#technical-notes)
-* [Frequently Asked Questions](https://github.com/JustVugg/colibri/blob/main/docker/README.md#frequently-asked-questions)
-* [Support and contributions](https://github.com/JustVugg/colibri/blob/main/docker/README.md#support-and-contributions)
-* [Testing on a low resource PC](https://github.com/JustVugg/colibri/blob/main/docker/README.md#testing-on-a-low-resource-pc)
+* [What is Colibrì?](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#what-is-colibr%C3%AC)
+* [Requirements](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#requirements)
+    * [Hardware](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#hardware)
+    * [Software](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#software)
+* [How to get started](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#how-to-get-started)
+    * [Step 1: Download the model](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#step-2-download-the-colibr%C3%AC-dockerfile)
+    * [Step 2: Download the Colibrì Dockerfile](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#step-2-download-the-colibr%C3%AC-dockerfile)
+    * [Step 3: Build the Docker image](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#step-3-build-the-docker-image)
+    * [Step 4: Start Colibrì](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#step-4-start-colibr%C3%AC)
+    * [What does that command mean?](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#what-does-that-command-mean)
+    * [Using Colibrì](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#using-colibr%C3%AC)
+* [Enter the container](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#entering-a-linux-console-inside-the-container)
+* [Troubleshooting](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#troubleshooting)
+* [Technical notes](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#technical-notes)
+* [Frequently Asked Questions](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#frequently-asked-questions)
+* [Support and contributions](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#support-and-contributions)
+* [Testing on a low resource PC](https://github.com/Developer3000S/colibri-rus/blob/main/docker/README.md#testing-on-a-low-resource-pc)
 
 ---
 
@@ -97,7 +97,7 @@ If you are on Windows and cannot get it to work with Python:
 
 ### Step 2: Download the Colibrì Dockerfile
 
-1. Go to: [https://github.com/JustVugg/colibri/blob/main/docker/Dockerfile](https://github.com/JustVugg/colibri/blob/main/docker/Dockerfile)
+1. Go to: [https://github.com/Developer3000S/colibri-rus/blob/main/docker/Dockerfile](https://github.com/Developer3000S/colibri-rus/blob/main/docker/Dockerfile)
 2. Click the **Download** button (⬇️ icon) in the top right
 3. Save the file in a folder (e.g., `C:\LLM\Colibrì`)
 
@@ -507,7 +507,7 @@ instead of only the machine that built it.
 Build it from the repo root (it needs the `c/` sources as context):
 
 ```bash
-git clone https://github.com/JustVugg/colibri.git && cd colibri
+git clone https://github.com/Developer3000S/colibri-rus.git && cd colibri
 docker build -t colibri -f docker/Dockerfile.slim .
 ```
 

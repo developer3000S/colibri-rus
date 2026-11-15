@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 # Let's clone the repository
 WORKDIR /app
-RUN git clone https://github.com/JustVugg/colibri.git .
+RUN git clone https://github.com/Developer3000S/colibri-rus.git .
 WORKDIR /app/c
 # It's time to compile
 RUN ./setup.sh && ./coli build

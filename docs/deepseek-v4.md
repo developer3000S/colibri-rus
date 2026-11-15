@@ -15,7 +15,7 @@ across kernels and cache states is spelled out in [Validation](#validation).
 ## Windows release (recommended)
 
 Windows users do not need to build or copy an engine manually. Download and
-unpack the [latest Windows release](https://github.com/JustVugg/colibri/releases/latest),
+unpack the [latest Windows release](https://github.com/Developer3000S/colibri-rus/releases/latest),
 then start Colibri through the release launcher:
 
 ```powershell

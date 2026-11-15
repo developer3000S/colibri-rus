@@ -49,7 +49,7 @@ if "%~1"=="" (
     echo double-clicking one only flashes a window.
     echo.
     echo Getting a model, step by step:
-    echo     https://github.com/JustVugg/colibri/blob/main/docs/quickstart.md
+    echo     https://github.com/Developer3000S/colibri-rus/blob/main/docs/quickstart.md
     call :offer_setup
     exit /b 0
 )

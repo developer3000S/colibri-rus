@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><img src="https://img.shields.io/badge/website-justvugg.github.io%2Fcolibri-1f6feb" alt="Sito web"></a>
-  <a href="https://github.com/JustVugg/colibri/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="Ultima release"></a>
+  <a href="https://github.com/Developer3000S/colibri-rus/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="Ultima release"></a>
 </p>
 
 <p align="center">
@@ -66,7 +66,7 @@ con i loro nomi)
 
 ```bash
 sudo apt install git python3 build-essential
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -76,7 +76,7 @@ cd colibri
 ```bash
 xcode-select --install
 brew install libomp git python
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -140,14 +140,14 @@ Cosa fa ogni passo, nel dettaglio: [docs/quickstart.md](docs/quickstart.md#the-o
 | `needs N GB free for the download` | `--dir` con una cartella su un disco più grande |
 | su WSL, la cartella del modello è sotto `/mnt/c` | tienila sul disco Linux (il predefinito, `~/colibri-models`): `/mnt/c` è molte volte più lento |
 | hai aggiornato il checkout (`git pull`) | rilancia `./start-here.sh`: ricompila il motore se i sorgenti sono cambiati, poi lo avvia |
-| qualsiasi altra cosa | `c/coli logs -n 50` mostra il log del server avviato in background (quello avviato in primo piano scrive nel suo terminale) e `c/coli logs --install` quello dell'installazione; apri una [issue](https://github.com/JustVugg/colibri/issues) con le ultime righe stampate dall'installazione |
+| qualsiasi altra cosa | `c/coli logs -n 50` mostra il log del server avviato in background (quello avviato in primo piano scrive nel suo terminale) e `c/coli logs --install` quello dell'installazione; apri una [issue](https://github.com/Developer3000S/colibri-rus/issues) con le ultime righe stampate dall'installazione |
 
 ### Lascia che sia il tuo assistente AI a installarlo
 
 Se usi un assistente AI per programmare, può fare tutto questo al posto tuo.
 Chiedigli:
 
-> Installa colibri su questa macchina seguendo docs/AI_SETUP.md da https://github.com/JustVugg/colibri
+> Installa colibri su questa macchina seguendo docs/AI_SETUP.md da https://github.com/Developer3000S/colibri-rus
 
 [docs/AI_SETUP.md](docs/AI_SETUP.md) dà all'assistente ogni passo sotto forma di
 comando con un risultato leggibile da una macchina, e gli dice di chiederti
@@ -358,7 +358,7 @@ nella RAM, e a ogni passo la CPU calcola quelli mentre la scheda calcola i suoi,
 nello stesso frame: Qwen3.8-Flash-Next IQ2_XS (68 GB) fa 50.6 tok/s in decode
 ([vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)). Un utente
 ha misurato Qwen3.6 da 17 a 19 tok/s su una Tesla V100 16 GB
-([#1852](https://github.com/JustVugg/colibri/issues/1852)). I numeri della tua
+([#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)). I numeri della tua
 scheda sono benvenuti.
 
 **Le schede senza Resizable BAR** ora funzionano. Una scheda così (tutte le
@@ -416,7 +416,7 @@ l'archivio principale e l'installazione sceglie CUDA.
   3070 con i layer densi in VRAM: da 25.4 a 30.0 tok/s
   ([qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md#the-deltanet-layer-on-the-card-q36_dn_gpu1)).
 - **Schede più vecchie.** Se il CUDA toolkit non compila più per la tua scheda
-  (CUDA 13 e una V100, in [#1852](https://github.com/JustVugg/colibri/issues/1852)),
+  (CUDA 13 e una V100, in [#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)),
   l'installazione lo vede prima di compilare e usa la scheda tramite Vulkan,
   spiegando perché; un CUDA toolkit 12.x riporta il percorso CUDA. Il livello
   CUDA di DeepSeek V4 si compila anche per Pascal e Turing
@@ -569,7 +569,7 @@ stesse sia che un expert risponda dalla VRAM, dalla RAM o dal disco.
   caldo fissato in memoria, appreso dalle tue conversazioni (`.coli_usage`,
   aggiornato a ogni turno). colibri diventa più veloce più lo usi. Funziona
   perché il routing ha una struttura misurabile
-  (l'[atlante degli expert](https://github.com/JustVugg/colibri/issues/175)).
+  (l'[atlante degli expert](https://github.com/Developer3000S/colibri-rus/issues/175)).
 - **Mai aspettare il disco due volte.** Le tre matrici di un expert si leggono
   con un solo `pread`; un pool di loader legge gli expert mancanti mentre quelli
   residenti calcolano; un batch di posizioni legge ogni expert una volta sola; un
@@ -624,9 +624,9 @@ expert. Decode di GLM-5.2, dalle [tabelle complete](docs/benchmarks.md):
   l'interleave NUMA selettivo
   ([log dell'esperimento](docs/experiments/glm52-6x5090-2026-07-12.md));
 - **128 GB, solo CPU** (Ryzen AI Max+ 395): 1.83 tok/s a caldo
-  ([#200](https://github.com/JustVugg/colibri/issues/200));
+  ([#200](https://github.com/Developer3000S/colibri-rus/issues/200));
 - **una singola RTX 5070 Ti, macchina di classe laptop:** 1.07 tok/s
-  ([#273](https://github.com/JustVugg/colibri/issues/273));
+  ([#273](https://github.com/Developer3000S/colibri-rus/issues/273));
 - **il portatile da 25 GB da cui tutto è cominciato:** 0.05-0.1 tok/s a freddo,
   il minimo onesto.
 
@@ -695,7 +695,7 @@ issue con i numeri.
 <a id="1-get-colibri"></a>
 
 **1. Il programma.** Prendi l'archivio per la tua piattaforma da
-[Releases](https://github.com/JustVugg/colibri/releases) (Linux x86_64, macOS,
+[Releases](https://github.com/Developer3000S/colibri-rus/releases) (Linux x86_64, macOS,
 Windows; non serve un compilatore, solo [Python 3](https://www.python.org/downloads/)
 per il launcher e l'API) ed estrailo, poi `python3 coli info`. I motori Linux e
 Windows hanno Vulkan dentro, con le loro `shaders/` accanto, quelli macOS Metal;
@@ -703,7 +703,7 @@ per una scheda NVIDIA su Windows aggiungi l'archivio CUDA. Oppure compila dai
 sorgenti con `gcc` (o clang) e OpenMP:
 
 ```bash
-git clone https://github.com/JustVugg/colibri && cd colibri/c
+git clone https://github.com/Developer3000S/colibri-rus && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1 for CUDA)
 ```
@@ -718,7 +718,7 @@ container group-scaled (gs64) con la testa MTP int8,
 (429 GB), oppure [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)
 per GLM-5.3 (419 GB, senza testa MTP). Non i vecchi mirror int4 per-row:
 misurano circa 9 punti in meno sulla qualità e hanno causato le risposte in loop
-di [#455](https://github.com/JustVugg/colibri/issues/455).
+di [#455](https://github.com/Developer3000S/colibri-rus/issues/455).
 `./coli convert --model /nvme/glm52_i4` costruisce lo stesso container dalla
 release FP8, shard per shard, senza mai aver bisogno di tutti i suoi 756 GB su
 disco nello stesso momento. Come controllare la testa MTP e il resto:
@@ -771,7 +771,7 @@ hardware, commit, modello, comando esatto, prompt, stato della cache,
 throughput, tempo al primo token, hit rate degli expert, byte letti e un
 controllo di qualità; cambia una sola variabile, ripeti e allega i log grezzi.
 Parti da [CONTRIBUTING.md](CONTRIBUTING.md) e dal [protocollo di benchmark](docs/benchmarking.md),
-poi [apri una issue](https://github.com/JustVugg/colibri/issues/new). Qui un
+poi [apri una issue](https://github.com/Developer3000S/colibri-rus/issues/new). Qui un
 fallimento ben controllato vale più di un numero veloce senza spiegazione.
 
 ## Documentazione

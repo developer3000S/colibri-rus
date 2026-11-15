@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><img src="https://img.shields.io/badge/website-justvugg.github.io%2Fcolibri-1f6feb" alt="Website"></a>
-  <a href="https://github.com/JustVugg/colibri/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="Latest release"></a>
+  <a href="https://github.com/Developer3000S/colibri-rus/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -65,7 +65,7 @@ $ ./coli chat
 
 ```bash
 sudo apt install git python3 build-essential
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -75,7 +75,7 @@ cd colibri
 ```bash
 xcode-select --install
 brew install libomp git python
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -138,14 +138,14 @@ Starting colibri
 | `needs N GB free for the download` | `--dir` с папкой на диске большего размера |
 | в WSL папка модели находится под `/mnt/c` | сохраните его на диске Linux (по умолчанию `~/colibri-models`): `/mnt/c` во много раз медленнее |
 | вы обновили кассу (`git pull`) | запустите `./start-here.sh` еще раз: он пересобирает движок при изменении исходных кодов, а затем запускает его |
-| что-нибудь еще | `c/coli logs -n 50` показывает журнал сервера, запущенного в фоновом режиме (сервер, запущенный на переднем плане, печатается на свой собственный терминал) и `c/coli logs --install` настройки; откройте [проблему](https://github.com/JustVugg/colibri/issues) с последними строками, напечатанными установкой |
+| что-нибудь еще | `c/coli logs -n 50` показывает журнал сервера, запущенного в фоновом режиме (сервер, запущенный на переднем плане, печатается на свой собственный терминал) и `c/coli logs --install` настройки; откройте [проблему](https://github.com/Developer3000S/colibri-rus/issues) с последними строками, напечатанными установкой |
 
 <a id="let-your-ai-assistant-set-it-up"></a>
 ### Пусть ваш ИИ-помощник настроит это
 
 Если вы используете помощника по программированию с искусственным интеллектом, он может сделать все это за вас. Спросите это:
 
-> Настройте colibri на этом компьютере, следуя инструкциям docs/AI_SETUP.md от https://github.com/JustVugg/colibri.
+> Настройте colibri на этом компьютере, следуя инструкциям docs/AI_SETUP.md от https://github.com/Developer3000S/colibri-rus.
 
 [docs/AI_SETUP.md](docs/ru/AI_SETUP.md) показывает помощнику каждый шаг в виде
 команда с машиночитаемым результатом и просит ее спросить вас перед этим
@@ -343,7 +343,7 @@ Qwen3.6-35B-A3B декодирует по адресу 92,9 tok/s и читае�
 на каждом этапе CPU вычисляет их, а карта вычисляет свои собственные, в
 тот же кадр: Qwen3.8-Flash-Next IQ2_XS (68 ГБ) декодирует на 50,6 tok/s там
 ([vulkan.md](docs/ru/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)). Пользователь измерил Qwen3,6 от 17 до 19 tok/s на
-Tesla V100 16 ГБ ([#1852](https://github.com/JustVugg/colibri/issues/1852)).
+Tesla V100 16 ГБ ([#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)).
 Приветствуются номера с вашей карты.
 
 **Карточки без панели изменяемого размера** теперь работают. Такая карта (каждая карта Тьюринга,
@@ -398,7 +398,7 @@ Qwen3.8-Flash-Next и Qwen3.6 с моделями, на которых он ра
   плотные слои во VRAM: от 25,4 до 30,0 tok/s
   ([qwen36-cuda-tier.md](docs/ru/qwen36-cuda-tier.md#the-deltanet-layer-on-the-card-q36_dn_gpu1)).
 - **Старые карты.** Если набор инструментов CUDA больше не компилируется для вашей карты (CUDA
-  13 и V100 в [#1852](https://github.com/JustVugg/colibri/issues/1852)),
+  13 и V100 в [#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)),
   установка видит ее перед сборкой и использует карту через Vulkan, говоря
   почему; набор инструментов CUDA 12.x возвращает путь CUDA.
   Уровень CUDA DeepSeek V4 также создан для Pascal и Turing.
@@ -553,7 +553,7 @@ else: `TYPESAFE_BASE_URL=http://127.0.0.1:8000` (ключ, который он �
   диск: послойный кэш LRU плюс закрепленный горячий набор, полученный из вашего собственного
   разговоры (`.coli_usage`, обновляются каждый ход). colibri становится быстрее, чем
   больше вы его используете. Это работает, потому что маршрутизация имеет измеримую структуру (
-  [экспертный атлас](https://github.com/JustVugg/colibri/issues/175)).
+  [экспертный атлас](https://github.com/Developer3000S/colibri-rus/issues/175)).
 - **Никогда не ждите диска дважды.** Три матрицы эксперта считываются за одну
   `pread`; пул загрузчиков читает недостающих экспертов, пока резидентные
   вычислить; пакет позиций читается каждым экспертом один раз; предпросмотр маршрутизатора
@@ -603,9 +603,9 @@ else: `TYPESAFE_BASE_URL=http://127.0.0.1:8000` (ключ, который он �
 - **6x RTX 5090, каждый резидент-эксперт:** 5,8-6,8 tok/s, 9,0-9,2 с выборочным
   NUMA чередование ([журнал эксперимента](docs/ru/experiments/glm52-6x5090-2026-07-12.md));
 - **128 ГБ, только процессор** (Ryzen AI Max+ 395): 1,83 tok/s теплый
-  ([#200](https://github.com/JustVugg/colibri/issues/200));
+  ([#200](https://github.com/Developer3000S/colibri-rus/issues/200));
 - **одиночная коробка класса ноутбука RTX 5070 Ti:** 1,07 tok/s
-  ([#273](https://github.com/JustVugg/colibri/issues/273));
+  ([#273](https://github.com/Developer3000S/colibri-rus/issues/273));
 - **ноутбук с 25 ГБ, на котором это началось:** 0,05–0,1 tok/s холодный, честный
   пол.
 
@@ -669,7 +669,7 @@ i5-13500 с 62 ГБ ОЗУ и RTX PRO 4000 Blackwell SFF (24 ГБ, 70 Вт),
 <a id="1-get-colibri"></a>
 
 **1. Программа.** Архив для вашей платформы взять с сайта
-[Релизы](https://github.com/JustVugg/colibri/releases) (Linux x86_64, macOS,
+[Релизы](https://github.com/Developer3000S/colibri-rus/releases) (Linux x86_64, macOS,
 Windows; компилятор не требуется, только [Python 3](https://www.python.org/downloads/)
 для лаунчера и API) и распакуйте его, затем `python3 coli info`. Linux
 и движки Windows имеют встроенный Vulkan, рядом с которым находится `shaders/`, и
@@ -677,7 +677,7 @@ Windows; компилятор не требуется, только [Python 3](h
 из исходного кода с помощью `gcc` (или clang) и OpenMP:
 
 ```bash
-git clone https://github.com/JustVugg/colibri && cd colibri/c
+git clone https://github.com/Developer3000S/colibri-rus && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1 for CUDA)
 ```
@@ -692,7 +692,7 @@ make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1
 (429 ГБ) или [`Justvugg/GLM-5.3-colibri-int4-g64`](https://huggingface.co/Justvugg/GLM-5.3-colibri-int4-g64)
 для GLM-5.3 (419 ГБ, без головки MTP). Не старые зеркала int4 для каждой строки: они
 показатель примерно на 9 пунктов хуже по качеству и вызвал зацикливание ответов
-[#455](https://github.com/JustVugg/colibri/issues/455). `./coli конвертировать --модель
+[#455](https://github.com/Developer3000S/colibri-rus/issues/455). `./coli конвертировать --модель
 /nvme/glm52_i4` собирает тот же контейнер из версии FP8, сегмент за сегментом,
 без необходимости одновременного использования 756 ГБ на диске. Как проверить головку МТР и
 остальное: [quickstart.md](docs/ru/quickstart.md#3-get-the-model). GGUF ты
@@ -745,7 +745,7 @@ colibri хочет, чтобы передовые модели меньше за
 первый токен, экспертная частота попаданий, прочитанные байты и проверка качества; изменить один
 переменную, повторите и прикрепите необработанные журналы. Начните с
 [CONTRIBUTING.md](CONTRIBUTING.md) и [протокол тестирования](docs/ru/benchmarking.md),
-затем [открыть вопрос](https://github.com/JustVugg/colibri/issues/new). А
+затем [открыть вопрос](https://github.com/Developer3000S/colibri-rus/issues/new). А
 хорошо контролируемый провал здесь стоит больше, чем необъяснимый быстрый результат.
 
 <a id="documentation"></a>

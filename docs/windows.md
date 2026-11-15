@@ -77,7 +77,7 @@ For guidance about gcc optimizations, a good source cab be: `https://wiki.gentoo
 \
 **colibri.exe and coli_cuda.*** build from MS Visual Studio and Nvidia CUDA Toolkit:\
 \
-> **Build from a git clone, inside `c/`.** The release zip ships the engines and the Python only, no `Makefile` and no `backend_cuda.cu`: `make cuda-dll` in the unzipped release folder answers `No rule to make target 'cuda-dll'` (#1405). `git clone https://github.com/JustVugg/colibri`, then every `make` below runs in `colibri\c`.\
+> **Build from a git clone, inside `c/`.** The release zip ships the engines and the Python only, no `Makefile` and no `backend_cuda.cu`: `make cuda-dll` in the unzipped release folder answers `No rule to make target 'cuda-dll'` (#1405). `git clone https://github.com/Developer3000S/colibri-rus`, then every `make` below runs in `colibri\c`.\
 Microsoft Visual Studio tools includes a `vcvars64.bat` batch file that appropriately sets all the paths. \
 It is in `"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"`\
 \
@@ -303,7 +303,7 @@ available.
 
 **Measured on a single RTX 5070 Ti + Core Ultra 9 (32 GB RAM):** CPU-only 0.63
 → CUDA attention+dense 0.72 → **1.07 tok/s** with the GPU-resident pipeline at
-decode ([#273](https://github.com/JustVugg/colibri/issues/273), merged in #274).
+decode ([#273](https://github.com/Developer3000S/colibri-rus/issues/273), merged in #274).
 
 ## AMD GPU
 

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://justvugg.github.io/colibri"><img src="https://img.shields.io/badge/website-justvugg.github.io%2Fcolibri-1f6feb" alt="Situs web"></a>
-  <a href="https://github.com/JustVugg/colibri/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="Rilis terbaru"></a>
+  <a href="https://github.com/Developer3000S/colibri-rus/releases"><img src="https://img.shields.io/github/v/release/JustVugg/colibri?color=2ea043" alt="Rilis terbaru"></a>
 </p>
 
 <p align="center">
@@ -65,7 +65,7 @@ nama masing-masing)
 
 ```bash
 sudo apt install git python3 build-essential
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -75,7 +75,7 @@ cd colibri
 ```bash
 xcode-select --install
 brew install libomp git python
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
 ./start-here.sh
 ```
@@ -142,14 +142,14 @@ Penjelasan mendetail mengenai setiap langkah:
 | `the ... build failed`, misalnya `Unsupported gpu architecture` ketika CUDA toolkit yang terinstal tidak lagi mendukung kartu tersebut | proses penyiapan terlebih dahulu memeriksa toolkit terhadap kartu dan memilih Vulkan secara otomatis sambil menjelaskan alasannya; jika build masih gagal, proses tersebut menawarkan pilihan berikutnya (Vulkan, lalu CPU). `./start-here.sh --backend vulkan` memaksa penggunaan Vulkan; `--no-gpu` tetap menggunakan CPU |
 | `needs N GB free for the download` | gunakan `--dir` dengan folder pada disk yang lebih besar |
 | di WSL, folder model berada di bawah `/mnt/c` | simpan di disk Linux (default, `~/colibri-models`): `/mnt/c` berkali-kali lebih lambat |
-| hal lainnya | `c/coli logs -n 50` menampilkan log server dan `c/coli logs --install` menampilkan log proses penyiapan; buka [issue](https://github.com/JustVugg/colibri/issues) dengan menyertakan baris terakhir yang ditampilkan proses penyiapan |
+| hal lainnya | `c/coli logs -n 50` menampilkan log server dan `c/coli logs --install` menampilkan log proses penyiapan; buka [issue](https://github.com/Developer3000S/colibri-rus/issues) dengan menyertakan baris terakhir yang ditampilkan proses penyiapan |
 
 ### Biarkan asisten AI Anda menyiapkannya
 
 Jika Anda menggunakan asisten coding AI, asisten tersebut dapat melakukan semua
 ini untuk Anda. Minta asisten tersebut:
 
-> Siapkan colibri di mesin ini dengan mengikuti docs/AI_SETUP.md dari https://github.com/JustVugg/colibri
+> Siapkan colibri di mesin ini dengan mengikuti docs/AI_SETUP.md dari https://github.com/Developer3000S/colibri-rus
 
 [docs/AI_SETUP.md](docs/AI_SETUP.md) memberikan setiap langkah kepada asisten
 sebagai perintah dengan hasil yang dapat dibaca mesin, dan memerintahkannya untuk
@@ -366,7 +366,7 @@ pada setiap langkah CPU menghitung pakar itu sementara kartu menghitung miliknya
 dalam frame yang sama: Qwen3.8-Flash-Next IQ2_XS (68 GB) melakukan decode 50.6
 tok/s ([vulkan.md](docs/vulkan.md#the-routed-experts-in-the-frame-vk_dmoeh)).
 Seorang pengguna mengukur Qwen3.6 pada 17 sampai 19 tok/s di Tesla V100 16 GB
-([#1852](https://github.com/JustVugg/colibri/issues/1852)). Angka dari kartu Anda
+([#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)). Angka dari kartu Anda
 sangat diharapkan.
 
 **Kartu tanpa Resizable BAR** kini dapat digunakan. Kartu seperti itu (semua
@@ -424,7 +424,7 @@ utama, dan setup akan memilih CUDA.
   ([qwen36-cuda-tier.md](docs/qwen36-cuda-tier.md#the-deltanet-layer-on-the-card-q36_dn_gpu1)).
 - **Kartu lama.** Jika CUDA toolkit tidak lagi dapat mengompilasi untuk kartu
   Anda (CUDA 13 dan V100, dalam
-  [#1852](https://github.com/JustVugg/colibri/issues/1852)), proses penyiapan
+  [#1852](https://github.com/Developer3000S/colibri-rus/issues/1852)), proses penyiapan
   mendeteksinya sebelum build dan menggunakan kartu melalui Vulkan sambil
   menjelaskan alasannya; CUDA 12.x toolkit mengaktifkan kembali jalur CUDA.
   CUDA tier DeepSeek V4 juga dapat di-build untuk Pascal dan Turing
@@ -586,7 +586,7 @@ dari VRAM, RAM, maupun disk.
   set yang di-pin dan dipelajari dari percakapan Anda sendiri (`.coli_usage`,
   diperbarui setiap turn). colibri menjadi lebih cepat semakin sering digunakan.
   Hal ini bekerja karena routing memiliki struktur yang dapat diukur
-  ([expert atlas](https://github.com/JustVugg/colibri/issues/175)).
+  ([expert atlas](https://github.com/Developer3000S/colibri-rus/issues/175)).
 - **Jangan menunggu disk dua kali.** Tiga matriks milik satu pakar dibaca dalam
   satu `pread`; sekumpulan loader membaca pakar yang belum tersedia sementara
   pakar resident melakukan komputasi; satu batch posisi membaca setiap pakar
@@ -642,9 +642,9 @@ pakar berada. Decode GLM-5.2, dari [tabel lengkap](docs/benchmarks.md):
   NUMA interleave
   ([log eksperimen](docs/experiments/glm52-6x5090-2026-07-12.md));
 - **128 GB, hanya CPU** (Ryzen AI Max+ 395): 1.83 tok/s warm
-  ([#200](https://github.com/JustVugg/colibri/issues/200));
+  ([#200](https://github.com/Developer3000S/colibri-rus/issues/200));
 - **satu mesin kelas laptop RTX 5070 Ti:** 1.07 tok/s
-  ([#273](https://github.com/JustVugg/colibri/issues/273));
+  ([#273](https://github.com/Developer3000S/colibri-rus/issues/273));
 - **laptop 25 GB tempat proyek ini bermula:** 0.05-0.1 tok/s cold, batas bawah
   yang realistis.
 
@@ -712,7 +712,7 @@ hasil pengukurannya.
 <a id="1-get-colibri"></a>
 
 **1. Programnya.** Ambil archive untuk platform Anda dari
-[Releases](https://github.com/JustVugg/colibri/releases) (Linux x86_64, macOS,
+[Releases](https://github.com/Developer3000S/colibri-rus/releases) (Linux x86_64, macOS,
 Windows; tidak memerlukan compiler, hanya [Python 3](https://www.python.org/downloads/)
 untuk launcher dan API), ekstrak, lalu jalankan `python3 coli info`. Engine
 Linux dan Windows sudah berisi Vulkan, dengan `shaders/` di sampingnya, dan engine
@@ -720,7 +720,7 @@ macOS berisi Metal; untuk kartu NVIDIA di Windows tambahkan archive CUDA. Atau b
 dari source menggunakan `gcc` (atau clang) dan OpenMP:
 
 ```bash
-git clone https://github.com/JustVugg/colibri && cd colibri/c
+git clone https://github.com/Developer3000S/colibri-rus && cd colibri/c
 ./setup.sh                                # checks gcc/OpenMP, builds, self-tests
 make qwen36 VK=1                          # one engine, here with Vulkan (CUDA=1 for CUDA)
 ```
@@ -737,7 +737,7 @@ MTP head,
 untuk GLM-5.3 (419 GB, tanpa MTP head). Jangan gunakan mirror int4 per-row yang
 lebih lama: hasil pengukurannya sekitar 9 poin lebih buruk dalam kualitas dan
 menyebabkan jawaban berulang pada
-[#455](https://github.com/JustVugg/colibri/issues/455). `./coli convert --model
+[#455](https://github.com/Developer3000S/colibri-rus/issues/455). `./coli convert --model
 /nvme/glm52_i4` membuat container yang sama dari rilis FP8, shard demi shard,
 tanpa pernah memerlukan seluruh 756 GB berada di disk sekaligus. Cara memeriksa
 MTP head dan bagian lainnya:
@@ -792,7 +792,7 @@ to first token, expert hit rate, byte yang dibaca, dan pemeriksaan kualitas;
 ubah satu variabel, ulangi, lalu lampirkan raw log. Mulailah dengan
 [CONTRIBUTING.md](CONTRIBUTING.md) dan
 [protokol benchmark](docs/benchmarking.md), lalu
-[buka issue](https://github.com/JustVugg/colibri/issues/new). Kegagalan yang
+[buka issue](https://github.com/Developer3000S/colibri-rus/issues/new). Kegagalan yang
 dikontrol dengan baik lebih bernilai di sini daripada angka cepat tanpa
 penjelasan.
 

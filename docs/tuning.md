@@ -20,9 +20,9 @@ is safe on any machine. See also [SETTINGS.md](SETTINGS.md) and
 | `PILOT=1` | router-lookahead disk prefetch (see below) |
 | `URING=1` | Linux-only batched expert I/O (implies `PIPE=1`) |
 | `PIPE=0` | disable the async expert-load pool (default ON — overlaps `pread` with matmul, −18% disk service) |
-| `DIRECT=1` | O_DIRECT expert reads (measured **+65%** alone on a Strix Halo, [#200](https://github.com/JustVugg/colibri/issues/200)) |
-| `COLI_NUMA=1` | interleave resident weights across NUMA nodes on multi-socket hosts ([#82](https://github.com/JustVugg/colibri/issues/82)) |
-| `CACHE_ROUTE=1` | cache-aware max-rank routing (opt-in, [#199](https://github.com/JustVugg/colibri/issues/199)) |
+| `DIRECT=1` | O_DIRECT expert reads (measured **+65%** alone on a Strix Halo, [#200](https://github.com/Developer3000S/colibri-rus/issues/200)) |
+| `COLI_NUMA=1` | interleave resident weights across NUMA nodes on multi-socket hosts ([#82](https://github.com/Developer3000S/colibri-rus/issues/82)) |
+| `CACHE_ROUTE=1` | cache-aware max-rank routing (opt-in, [#199](https://github.com/Developer3000S/colibri-rus/issues/199)) |
 | `AUTOPIN=0` | disable the learning cache's auto-pin |
 | `CAP_RAISE=0` | don't auto-grow the expert cache |
 | `KVSAVE=0` | disable KV-cache persistence |
@@ -196,7 +196,7 @@ The engine records which experts your usage actually routes to (`.coli_usage`
 next to the model, updated every turn) and at startup automatically pins the
 hottest ones in spare RAM — colibrì literally gets faster the more you use it.
 `PIN=auto` seeds the pin directly from the live usage history
-([#301](https://github.com/JustVugg/colibri/pull/301)).
+([#301](https://github.com/Developer3000S/colibri-rus/pull/301)).
 
 **The expert cache auto-sizes to your RAM** (since 2026-07-10): the engine
 *raises* the LRU cap to fill your `--ram` budget instead of only lowering it.
@@ -249,7 +249,7 @@ with 26% of experts, but the same experts cover 57.7% of a separate Qwen3.8
 session (`docs/experiments/vulkan-qwen38-mtp-2026-10-05/history.usage.gz`).
 Coverage is also a lower bound on the hit rate, since the LRU serves part of
 the rest. Models without hot experts (OLMoE,
-[#864](https://github.com/JustVugg/colibri/issues/864)) show up as a nearly
+[#864](https://github.com/Developer3000S/colibri-rus/issues/864)) show up as a nearly
 straight curve.
 
 ## Router-lookahead prefetch (`PILOT=1`, experimental)
@@ -261,29 +261,29 @@ next-layer expert readahead from a dedicated I/O thread while the current layer
 computes. `PILOT_REAL=1` moves the prefetched loads off the critical path
 (measured +11pp hit rate on a big-cache host), and `PILOT_TWO=1` folds the
 computed shared-expert into the prediction (+3% recall,
-[#200](https://github.com/JustVugg/colibri/issues/200)). On disk-saturated
+[#200](https://github.com/Developer3000S/colibri-rus/issues/200)). On disk-saturated
 hosts hint-only PILOT can be net negative — measure on yours.
 
 ## Speculation and reproducibility
 
 Speculative decoding requires that the draft and verify paths compute the same
-function — `SPEC_PIN=1` (default since [#294](https://github.com/JustVugg/colibri/pull/294))
+function — `SPEC_PIN=1` (default since [#294](https://github.com/Developer3000S/colibri-rus/pull/294))
 pins every forward issued while drafts are live to the platform's S=1 kernel
 family. For byte-exact reproducibility across runs: `DRAFT=0`, plus `IDOT=0
 COLI_CUDA=0` if you also want kernel-family/GPU independence. Acceptance
 percentages are not comparable across engine versions under `--topp`
-([#163](https://github.com/JustVugg/colibri/issues/163) has the full story).
+([#163](https://github.com/Developer3000S/colibri-rus/issues/163) has the full story).
 
 GLM-5.2's native MTP head drafts tokens that the main model verifies in one
 batched forward: 2.2–2.8 tokens/forward when it pays. The MTP head must be
 **int8**: int4 heads collapse to 0–4% acceptance
-([#8](https://github.com/JustVugg/colibri/issues/8)). Grammar-forced drafts
+([#8](https://github.com/Developer3000S/colibri-rus/issues/8)). Grammar-forced drafts
 ([`GRAMMAR=file.gbnf`](grammar-draft.md)) add nearly free acceptance on
 constrained JSON output. Whether speculation is a net win depends on your cache
 temperature: measure, and use `DRAFT=0` when it does not pay.
 
 Verify batches can also opt into an **exact attention core** with
-`COLI_EXACT_VERIFY=1` ([#689](https://github.com/JustVugg/colibri/issues/689)):
+`COLI_EXACT_VERIFY=1` ([#689](https://github.com/Developer3000S/colibri-rus/issues/689)):
 the CPU MLA-absorb score and context dots accumulate integer products and round
 once, so a near-tie in a verify row resolves the same way on every host, at
 roughly 0.6x tok/s on a tiny oracle (the dot itself is ~5–7x the float loop).
@@ -332,7 +332,7 @@ DEGRADE_ZERO=1 DEGRADE_TAU=0.03 COLI_MODEL=/nvme/glm52_i4 ./coli chat
 ```
 
 See [ENVIRONMENT.md](ENVIRONMENT.md) for the full variable reference and
-[issue #865](https://github.com/JustVugg/colibri/issues/865) for the
+[issue #865](https://github.com/Developer3000S/colibri-rus/issues/865) for the
 measurement methodology.
 
 ## Conversations reopen warm

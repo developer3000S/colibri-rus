@@ -52,7 +52,7 @@ from disk only if CUDA later fails).
 
 `CUDA_EXPERT_GB=auto` fills each device up to measured free memory minus
 projected dense tensors and headroom. `PIN_GB=all` then loads the remaining
-routed experts into RAM **up to the `--ram` budget** (it clamps — [#229](https://github.com/JustVugg/colibri/issues/229)),
+routed experts into RAM **up to the `--ram` budget** (it clamps — [#229](https://github.com/Developer3000S/colibri-rus/issues/229)),
 eliminating decode-time disk misses when capacity permits. This mode is intended
 for dedicated high-memory inference hosts.
 
@@ -123,7 +123,7 @@ would invalidate the sidecar's fixed expert order.
 residual adds, router GEMMs and the shared expert run on the GPU while the CPU
 expert loop runs uninterrupted, with batched attention and grouped expert
 uploads at prefill. On a single-GPU host this also pays at decode (S=1):
-**+49%** measured on a 5070 Ti ([#273](https://github.com/JustVugg/colibri/issues/273)/#274);
+**+49%** measured on a 5070 Ti ([#273](https://github.com/Developer3000S/colibri-rus/issues/273)/#274);
 on multi-GPU hosts the per-layer P2P hops cancel the gain, so the decode gate is
 device-count aware. `COLI_CUDA_TC_W4A16=1` enables Tensor-Core int4×fp16 mixed
 dispatch for batched rows (pays at ≥16 rows).
@@ -289,7 +289,7 @@ the next one at its start (`griddepcontrol.launch_dependents`) measured slower: 
   measured 0.94–1.64 tok/s hot-first vs 0.29 tok/s filled without routing heat.
 - The GPU tier earns its VRAM only when the CPU is the weak link — a tuned
   AVX-512 CPU can match a 5090 on expert matmul
-  ([#101](https://github.com/JustVugg/colibri/issues/101)).
+  ([#101](https://github.com/Developer3000S/colibri-rus/issues/101)).
 
 ## Reproducible backend A/B without the full checkpoint
 

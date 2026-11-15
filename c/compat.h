@@ -639,7 +639,7 @@ static inline void coli_print_launcher_help(const char *engine, const char *by_h
         "\n"
         "The launcher needs Python 3 and picks the right engine for the model.\n"
         "(Running the engine by hand: %s)\n"
-        "Getting a model, step by step: https://github.com/JustVugg/colibri"
+        "Getting a model, step by step: https://github.com/Developer3000S/colibri-rus"
         "/blob/main/docs/quickstart.md\n",
         engine, run, run, run, run, by_hand);
     coli_hold_console();

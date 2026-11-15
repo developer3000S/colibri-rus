@@ -79,7 +79,7 @@ Windows 11 профессиональная на английском языке
 \
 **colibri.exe и coli_cuda.*** создаются из MS Visual Studio и Nvidia CUDA Toolkit:\
 \
-> **Сборка из клона git, внутри `c/`.** В zip-архиве выпуска содержатся только движки и Python, без `Makefile` и без `backend_cuda.cu`: `make cuda-dll` в разархивированной папке релиза отвечает `No rule to make target 'cuda-dll'` (#1405). `git clone https://github.com/JustVugg/colibri`, то каждое `make` ниже соответствует `colibri\c`.\
+> **Сборка из клона git, внутри `c/`.** В zip-архиве выпуска содержатся только движки и Python, без `Makefile` и без `backend_cuda.cu`: `make cuda-dll` в разархивированной папке релиза отвечает `No rule to make target 'cuda-dll'` (#1405). `git clone https://github.com/Developer3000S/colibri-rus`, то каждое `make` ниже соответствует `colibri\c`.\
 Инструменты Microsoft Visual Studio включают пакетный файл `vcvars64.bat`, который соответствующим образом устанавливает все пути. \
 Это в `"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"`\
 \
@@ -310,7 +310,7 @@ DLL экспортирует всю поверхность `extern "C"` (вкл�
 
 **Измерено на одной карте RTX 5070 Ti + Core Ultra 9 (32 ГБ ОЗУ):** только для CPU: 0,63
 → Внимание CUDA+плотность 0,72 → **1,07 tok/s** с резидентным конвейером GPU на
-декодировать ([#273](https://github.com/JustVugg/colibri/issues/273), объединено в #274).
+декодировать ([#273](https://github.com/Developer3000S/colibri-rus/issues/273), объединено в #274).
 
 <a id="nvidia-gpu-optional-via-runtime-dll"></a>
 ## графический процессор AMD

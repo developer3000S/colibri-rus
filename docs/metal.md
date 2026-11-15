@@ -9,7 +9,7 @@ Decode is token-exact vs the CPU path. Prefill's large GEMMs run on the GPU in a
 different accumulation order, so on **near-tie logits** they can occasionally pick a
 different top token than the CPU — a floating-point ordering difference, not a kernel
 bug (`make metal-test` passes the GEMM at ~3e-6 against a 1e-4 tolerance; see
-[#622](https://github.com/JustVugg/colibri/issues/622)). It is invisible in normal use
+[#622](https://github.com/Developer3000S/colibri-rus/issues/622)). It is invisible in normal use
 but can surface in teacher-forced oracle comparisons on pathological 4-bit toy
 containers. Set `COLI_METAL_GEMM_MIN=100000` to keep every GEMM on the CPU for
 bit-exact prefill (`DEBUG_LOGITS=1` on a `TF=1` run dumps the top-5 logits and the
@@ -20,7 +20,7 @@ attention — projections, scores, softmax, value, output — runs on the GPU in
 command buffer instead of the CPU. On a 544-token prompt this cuts prefill attention
 ~4x (35.9 s → 9.0 s). It is **off by default**: like the prefill GEMM above, the GPU
 accumulates in a different order and can pick a different top token on near-tie logits
-(same [#622](https://github.com/JustVugg/colibri/issues/622) family), so a greedy stream
+(same [#622](https://github.com/Developer3000S/colibri-rus/issues/622) family), so a greedy stream
 is not guaranteed bit-identical to the CPU — on natural prompts it stays consistent, on
 pathological repetitive prompts an early token can flip. Turn it on when prefill latency
 matters more than exact CPU parity; prompts past the single-dispatch thread cap fall
@@ -42,7 +42,7 @@ with nothing to build, and without it they run on the CPU as before.
 Measured on an M4 Max (128 GB, warm cache, MTP on): CPU 0.30 → Metal
 **0.42 tok/s (~1.4×)** (best config adds `DIRECT=1`; ~3× vs this machine's
 first cold run). An M5 Max with a 46.9 GB learned pin reached **2.06 tok/s**
-([#103](https://github.com/JustVugg/colibri/issues/103); see also the
+([#103](https://github.com/Developer3000S/colibri-rus/issues/103); see also the
 [M5 Max performance report](METAL-M5MAX-PERF-REPORT.md)).
 
 Key design points: Metal's ~5 ms submit latency makes per-matmul dispatch a

@@ -46,8 +46,8 @@ vision = [   # pictures through the gateway (the towers' preprocessors)
 coli = "colibri.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/JustVugg/colibri"
-Issues = "https://github.com/JustVugg/colibri/issues"
+Homepage = "https://github.com/Developer3000S/colibri-rus"
+Issues = "https://github.com/Developer3000S/colibri-rus/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "colibri._version.__version__"}

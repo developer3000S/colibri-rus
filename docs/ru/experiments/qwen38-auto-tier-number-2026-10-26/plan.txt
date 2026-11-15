@@ -23,7 +23,7 @@
 #   |                   "vram": plan["tiers"]["vram"], "env": rp.environment_for_plan(plan, {}, True)}, indent=2))
 
 ===== 01_git.log (sha256 d9de1ffe1bf54280dc721225b0343e51e6df6feb8500cf5d4428c9fc179278a0)
-# set -e; rm -rf /content/colibri /content/colibri-pr; git clone -q https://github.com/JustVugg/colibri.git /content/colibri; cd /content/colibri; git checkout -q 77530b49ddd2f4e6ad1b3bb52500491e0c8ed9bb; git log -1 --format='%H %ci %s'; git clone -q /content/colibri /content/colibri-pr; cd /content/colibri-pr; git checkout -q 77530b49ddd2f4e6ad1b3bb52500491e0c8ed9bb; git apply /content/fix6.patch; git status --short; sha256sum /content/fix6.patch /content/storia /content/prompt120.txt /content/prompt-lungo.txt
+# set -e; rm -rf /content/colibri /content/colibri-pr; git clone -q https://github.com/Developer3000S/colibri-rus.git /content/colibri; cd /content/colibri; git checkout -q 77530b49ddd2f4e6ad1b3bb52500491e0c8ed9bb; git log -1 --format='%H %ci %s'; git clone -q /content/colibri /content/colibri-pr; cd /content/colibri-pr; git checkout -q 77530b49ddd2f4e6ad1b3bb52500491e0c8ed9bb; git apply /content/fix6.patch; git status --short; sha256sum /content/fix6.patch /content/storia /content/prompt120.txt /content/prompt-lungo.txt
 # rc=0 elapsed=10.4s
 
 77530b49ddd2f4e6ad1b3bb52500491e0c8ed9bb 2026-10-25 20:22:16 +0100 Merge pull request #2386 from JustVugg/batch/external-2026-10-25

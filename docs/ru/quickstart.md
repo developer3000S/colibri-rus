@@ -24,7 +24,7 @@
 **Linux и macOS:**
 
 ```bash
-git clone https://github.com/JustVugg/colibri.git
+git clone https://github.com/Developer3000S/colibri-rus.git
 cd colibri
 ./start-here.sh
 ```
@@ -132,7 +132,7 @@ Windows). `c/coli status` показывает, что установлено, �
 
 > **Ярлык — полностью пропустить разделы 1 и 2.** Публикуются готовые архивы.
 > для **Linux, macOS и Windows** на
-> [Страница релизов](https://github.com/JustVugg/colibri/releases): распакуйте один,
+> [Страница релизов](https://github.com/Developer3000S/colibri-rus/releases): распакуйте один,
 > установите [Python 3](https://www.python.org/downloads/) и сразу переходите к
 > [шаг 3](#3-get-the-model). Движок готов к работе, а `coli`
 > лаунчер находит его рядом с собой — ни компилятора, ни переименования, ни настройки.
@@ -177,7 +177,7 @@ OpenMP и никаких встроенных функций только для
 
 **Вариант А — загрузите готовый двоичный файл (компилятор не требуется).**
 Возьмите `colibri-<version>-windows-x86_64.zip` из
-[Страница выпусков](https://github.com/JustVugg/colibri/releases) и разархивируйте ее.
+[Страница выпусков](https://github.com/Developer3000S/colibri-rus/releases) и разархивируйте ее.
 Внутри вы найдете:
 
 | Файл | Что это такое |
@@ -228,7 +228,7 @@ brew install libomp git python  # OpenMP for multithreading
 ## 2. Получите код и создайте движок
 
 ```bash
-git clone https://github.com/JustVugg/colibri.git
+git clone https://github.com/Developer3000S/colibri-rus.git
 cd colibri/c
 ./setup.sh
 ```
@@ -269,16 +269,16 @@ head, поэтому спекулятивное декодирование от�
 Групповые масштабы имеют значение: старые контейнеры int4 для каждой строки
 (`mateogrgic/…-int4-with-int8-mtp`, `jlnsrk/…`) на ~9 п.п. хуже по качеству
 тесты и являются основной причиной циклов режима мышления и бесконечных
-поколения в [#455](https://github.com/JustVugg/colibri/issues/455) —
+поколения в [#455](https://github.com/Developer3000S/colibri-rus/issues/455) —
 Контейнер gs64 исправил все случаи сбоя в этом отчете. (Головка MTP int8
 также требуется: простые головки int4 отключают спекулятивное декодирование, см.
-[#8](https://github.com/JustVugg/colibri/issues/8).)
+[#8](https://github.com/Developer3000S/colibri-rus/issues/8).)
 
 Загрузите его в папку на быстром диске, например. `/nvme/glm52_i4` (Linux/macOS) или
 `D:\glm52_i4` (Windows). Его объем составляет около **429 ГБ**, поэтому убедитесь, что у вас достаточно места.
 
 Заголовок MTP должен быть **int8, а не int4** (int4 дает 0 % принятия черновика,
-[#8](https://github.com/JustVugg/colibri/issues/8)). Проверьте это с помощью
+[#8](https://github.com/Developer3000S/colibri-rus/issues/8)). Проверьте это с помощью
 `ls -l <model>/out-mtp-*`: int8 (правильно) — `3527131672 / 5366238584 / 1065950496`
 как три файла или один `out-mtp-00000.safetensors` из `9959321520` байтов
 (текущая загрузка рекомендуемого контейнера отправляет его как один файл: то же самое)
@@ -369,7 +369,7 @@ make qwen36 ARCH=x86-64-v2          # the engine of your model: qwen36, qwen38, 
 
 ```bash
 pacman -S --needed git make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libgomp
-git clone https://github.com/JustVugg/colibri
+git clone https://github.com/Developer3000S/colibri-rus
 cd colibri/c
 make qwen36.exe ARCH=x86-64-v2
 ```

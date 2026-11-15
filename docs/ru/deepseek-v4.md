@@ -17,7 +17,7 @@ DeepSeek V4 Flash запускается с официальной контро�
 ## Версия Windows (рекомендуется)
 
 Пользователям Windows не нужно собирать или копировать движок вручную. Загрузите и
-распакуйте [последнюю версию Windows](https://github.com/JustVugg/colibri/releases/latest),
+распакуйте [последнюю версию Windows](https://github.com/Developer3000S/colibri-rus/releases/latest),
 затем запустите Colibri через программу запуска релизов:
 
 ```powershell

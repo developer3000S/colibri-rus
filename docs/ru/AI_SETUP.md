@@ -31,7 +31,7 @@ Python 3.10 или новее и копия репозитория.
 
 ```bash
 python3 --version                              # Windows: py -3 --version
-git clone https://github.com/JustVugg/colibri  # or use the folder the user already has
+git clone https://github.com/Developer3000S/colibri-rus  # or use the folder the user already has
 cd colibri
 ```
 

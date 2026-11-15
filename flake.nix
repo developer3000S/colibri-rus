@@ -153,7 +153,7 @@
 
           meta = with pkgs.lib; {
             description = "Run large MoE models (GLM-5.2, OLMoE, DeepSeek V4 Flash) in pure C, experts streamed from disk";
-            homepage = "https://github.com/JustVugg/colibri";
+            homepage = "https://github.com/Developer3000S/colibri-rus";
             license = licenses.asl20;
             platforms = with platforms; linux ++ darwin;
             mainProgram = "coli";

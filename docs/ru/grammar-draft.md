@@ -2,9 +2,9 @@
 # спекулятивные черновики с грамматическим уклоном
 
 *Каноническая ссылка на черновой вариант источника `GRAMMAR=` (метод F). История: идея в
-[#48](https://github.com/JustVugg/colibri/issues/48), реализация в
-[#70](https://github.com/JustVugg/colibri/pull/70), объединенная рецензия с A/B
-измерения и исправления в [#146](https://github.com/JustVugg/colibri/issues/146).*
+[#48](https://github.com/Developer3000S/colibri-rus/issues/48), реализация в
+[#70](https://github.com/Developer3000S/colibri-rus/pull/70), объединенная рецензия с A/B
+измерения и исправления в [#146](https://github.com/Developer3000S/colibri-rus/issues/146).*
 
 <a id="the-mechanism-in-one-paragraph"></a>
 ## Механизм в одном абзаце

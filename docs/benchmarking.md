@@ -13,7 +13,7 @@ bandwidth":
 |---|---|---|
 | 75 MB/s | 4 KiB random, QD1, Python | latency-bound small blocks, not expert-slab traffic |
 | 3683 MB/s | 128 KiB, QD32 | warm page cache, not the device |
-| 675 MB/s | unbuffered, 4 KiB-aligned lengths | a confounded run whose proposed 64 KiB length effect was later refuted ([#863](https://github.com/JustVugg/colibri/issues/863)) |
+| 675 MB/s | unbuffered, 4 KiB-aligned lengths | a confounded run whose proposed 64 KiB length effect was later refuted ([#863](https://github.com/Developer3000S/colibri-rus/issues/863)) |
 | about 2900–3000 MB/s | unbuffered, 64 KiB-multiple, QD4+ | the useful result for that host and workload |
 
 The third row is deliberately retained as a retraction. A controlled rerun did
@@ -73,7 +73,7 @@ prompt record. See [benchmarks.md](benchmarks.md) for current measurements,
 platform-specific I/O constraints.
 
 This protocol originated with the measurements and draft contributed by
-[@outtodata in #867](https://github.com/JustVugg/colibri/issues/867), including
+[@outtodata in #867](https://github.com/Developer3000S/colibri-rus/issues/867), including
 their later correction of the #863 explanation.
 
 ## Compare HTTP serving with a fixed workload

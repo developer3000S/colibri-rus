@@ -1,6 +1,6 @@
 # CNRE Phase 0: offline residency-policy simulator
 
-This experiment supports [Discussion #884](https://github.com/JustVugg/colibri/discussions/884).
+This experiment supports [Discussion #884](https://github.com/Developer3000S/colibri-rus/discussions/884).
 It does not modify an engine or claim a runtime speedup. It replays existing
 `ROUTE_TRACE` files through bounded expert caches so weak policies can be
 rejected before changing inference code or renting hardware.

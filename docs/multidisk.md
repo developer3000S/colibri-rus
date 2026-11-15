@@ -86,17 +86,17 @@ Compute, cache residency, and shared PCIe/controller bandwidth can dominate.
 Compare the complete inference workload, not just the drive probe.
 
 - **Two independent NVMe drives helped.** The Threadripper PRO 7965WX report in
-  [#1249](https://github.com/JustVugg/colibri/issues/1249), also recorded in
+  [#1249](https://github.com/Developer3000S/colibri-rus/issues/1249), also recorded in
   [the benchmark table](benchmarks.md), measured 0.80 to 1.10 tok/s (+37.5%)
   with `DIRECT=1`; the buffered comparison gained about 16%.
 - **Mixed-speed drives exposed a bug that has since been fixed.**
-  [#1270](https://github.com/JustVugg/colibri/pull/1270) replaced equal-sized
+  [#1270](https://github.com/Developer3000S/colibri-rus/pull/1270) replaced equal-sized
   stripes with bandwidth-weighted chunks. Before that fix, adding a SATA drive
   to two NVMe drives reduced GLM-5.2 decode from 0.900 to 0.666 tok/s in the
   reported experiment. This is historical evidence, not a current slowdown
   attributed to every SATA mirror.
 - **The post-fix third drive was neutral on that host.** The contributor's
-  [follow-up on `dev`](https://github.com/JustVugg/colibri/pull/1270#issuecomment-5466324415)
+  [follow-up on `dev`](https://github.com/Developer3000S/colibri-rus/pull/1270#issuecomment-5466324415)
   reported 1.030 tok/s with two NVMe drives and 1.006 with the added SATA drive
   (five interleaved runs per arm, reported standard deviations 0.041 and 0.034).
   The author judged the difference within run-to-run variation. That Windows
@@ -104,7 +104,7 @@ Compare the complete inference workload, not just the drive probe.
   on another machine.
 
 These are community measurements on specific configurations, not new results
-from this guide. [#1137](https://github.com/JustVugg/colibri/issues/1137) contains
+from this guide. [#1137](https://github.com/Developer3000S/colibri-rus/issues/1137) contains
 the multi-disk discussion and an earlier mixed-speed report.
 
 ## Compare against one drive

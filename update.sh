@@ -31,6 +31,7 @@ echo "[3/4] Pushing data to GitHub (branch main)..."
 git gc --auto > /dev/null 2>&1
 git push origin main --no-thin
 
+if [ $? -eq 0 ]; then
     echo "--- Success: Repository updated! ---"
 else
     echo "--- Error: Failed to update repository. ---"

@@ -18,7 +18,7 @@
 ## Одноэтапный способ
 
 **Windows**: скачайте репозиторий (на GitHub: **Код**, затем **Загрузите ZIP**,
-и разархивируйте его; или `git clone`), затем дважды щелкните **`START-HERE.bat`** в
+и разархивируйте его; или `git clone`), затем дважды щелкните **`START.bat`** в
 верхняя папка.
 
 **Linux и macOS:**
@@ -26,7 +26,7 @@
 ```bash
 git clone https://github.com/Developer3000S/colibri-rus.git
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 Оба запускают `coli setup`, который делает все остальное:
@@ -54,10 +54,10 @@ cd colibri
 5. **Запускается colibri**, открывается панель управления в браузере и распечатывается
    адреса, которые могут использовать другие приложения.
 
-Что вы видите в Linux (в Windows то же самое, в окне `START-HERE.bat` открывается):
+Что вы видите в Linux (в Windows то же самое, в окне `START.bat` открывается):
 
 ```
-$ ./start-here.sh
+$ ./start.sh
 colibri setup
 
 Your machine
@@ -91,12 +91,12 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**Позже:** снова запустите `START-HERE.bat` или `./start-here.sh` и запустится colibri.
+**Позже:** снова запустите `START.bat` или `./start.sh` и запустится colibri.
 сразу, без второй загрузки или сборки. Чтобы остановить его, нажмите Ctrl+C в
 его окно или запустите `c/coli stop` с другого терминала (`c\coli.cmd stop` на
 Windows). `c/coli status` показывает, что установлено, работает ли оно, его
 адреса и скорость последнего ответа. Чтобы выбрать другую модель:
-`./start-here.sh --reconfigure`.
+`./start.sh --reconfigure`.
 
 **В WSL** сохраните модель на диске Linux (по умолчанию `~/colibri-models`),
 никогда не ниже `/mnt/c`. Если собственная сеть WSL намного медленнее, чем сеть Windows (она может
@@ -193,7 +193,7 @@ OpenMP и никаких встроенных функций только для
 API-шлюз — это скрипты Python (сам движок — чистый C и ничего не требует).Никакого переименования, никакой настройки: лаунчер находит `colibri.exe` рядом с собой.
 При использовании карты NVIDIA RTX серии 30, 40 или 50 также распакуйте
 `colibri-<version>-windows-x86_64-cuda.zip` в ту же папку для CUDA
-([windows.md](windows.md#if-you-downloaded-a-release-archive-start-here)).
+([windows.md](windows.md#if-you-downloaded-a-release-archive-start)).
 
 Для лучшего понимания из командной строки powershell приведена полная строка вызова. 
 (в зависимости от программы запуска py, которая запускается из папки, где находится colibri.exe):

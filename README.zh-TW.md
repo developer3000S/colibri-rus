@@ -45,7 +45,7 @@ $ ./coli chat
 **Windows**
 
 1. 在這個頁面上按 **Code**，再按 **Download ZIP**，然後解壓縮。
-2. 在解壓縮後的資料夾中按兩下 **`START-HERE.bat`**。如果缺少 Python，
+2. 在解壓縮後的資料夾中按兩下 **`START.bat`**。如果缺少 Python，
    它會提議幫你安裝。
 
 **Linux**（Ubuntu 與 Debian；其他發行版也有相同的套件，
@@ -55,7 +55,7 @@ $ ./coli chat
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS**（需要 [Homebrew](https://brew.sh)）
@@ -65,7 +65,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 你只需要回答一個問題：要用哪個模型；直接按 Enter 就會採用推薦。
@@ -96,12 +96,12 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**下一次**，再執行一次 `START-HERE.bat` 或 `./start-here.sh` 即可：colibri 會直接啟動，
+**下一次**，再執行一次 `START.bat` 或 `./start.sh` 即可：colibri 會直接啟動，
 不需要下載，也不需要建置。`c/coli status` 會顯示已安裝的內容以及是否正在執行，
 `c/coli stop` 則會停止它（在 Windows 上是 `c\coli.cmd status` 與
 `c\coli.cmd stop`）。
 
-選項放在 `./start-here.sh` 或 `START-HERE.bat` 後面：
+選項放在 `./start.sh` 或 `START.bat` 後面：
 
 | 選項 | 作用 |
 |---|---|
@@ -121,10 +121,10 @@ Starting colibri
 |---|---|
 | 下載到一半停止了 | 再執行一次相同的指令：它會從硬碟上已有的位元組接著下載 |
 | `to use the GPU through ..., first run: <command>` | 執行那條指令，然後再執行一次安裝程式：它會為 GPU 重新建置，不會重新下載 |
-| `the ... build failed`，例如已安裝的 CUDA toolkit 不再支援這張顯示卡時出現的 `Unsupported gpu architecture` | 安裝程式會先把 toolkit 和顯示卡對照檢查，自行選擇 Vulkan，並說明原因；如果建置仍然失敗，它會提供下一個選項（先 Vulkan，再 CPU）。`./start-here.sh --backend vulkan` 會強制使用 Vulkan；`--no-gpu` 則留在 CPU 上 |
+| `the ... build failed`，例如已安裝的 CUDA toolkit 不再支援這張顯示卡時出現的 `Unsupported gpu architecture` | 安裝程式會先把 toolkit 和顯示卡對照檢查，自行選擇 Vulkan，並說明原因；如果建置仍然失敗，它會提供下一個選項（先 Vulkan，再 CPU）。`./start.sh --backend vulkan` 會強制使用 Vulkan；`--no-gpu` 則留在 CPU 上 |
 | `needs N GB free for the download` | 用 `--dir` 指定一個位於較大硬碟上的資料夾 |
 | 在 WSL 上，模型資料夾位於 `/mnt/c` 底下 | 把它放在 Linux 磁碟上（預設的 `~/colibri-models`）：`/mnt/c` 慢上好幾倍 |
-| 更新了程式碼（`git pull`） | 重新執行 `./start-here.sh`：如果原始碼有變動，它會先重新編譯引擎，再啟動 |
+| 更新了程式碼（`git pull`） | 重新執行 `./start.sh`：如果原始碼有變動，它會先重新編譯引擎，再啟動 |
 | 其他任何問題 | `c/coli logs -n 50` 會顯示在背景啟動的伺服器日誌（在前景啟動的伺服器會輸出到它自己的終端機），`c/coli logs --install` 則顯示安裝程式的日誌；請附上安裝程式最後印出的幾行，開一個 [issue](https://github.com/Developer3000S/colibri-rus/issues) |
 
 ### 讓你的 AI 助手幫你安裝
@@ -176,7 +176,7 @@ Starting colibri
 
 安裝程式會推薦能在你的機器上從 RAM 執行、能力最強的模型，
 並在它正下方列出從硬碟串流讀取的更大模型。
-`./start-here.sh --list` 會把所有模型與你的機器逐一對照列出。下面的表格依據安裝程式本身的目錄
+`./start.sh --list` 會把所有模型與你的機器逐一對照列出。下面的表格依據安裝程式本身的目錄
 （[`c/setup_catalog.py`](c/setup_catalog.py)）；
 下載大小是 Hugging Face 為每個儲存庫列出的大小。
 
@@ -684,7 +684,7 @@ colibri 希望讓前沿模型減少對稀缺硬體的依賴，並降低執行成
 ## 儲存庫結構
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

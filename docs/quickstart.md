@@ -16,7 +16,7 @@ Use an AI coding assistant? Ask it to set up colibri following [docs/AI_SETUP.md
 ## The one-step way
 
 **Windows:** download the repository (on GitHub: **Code**, then **Download ZIP**,
-and unzip it; or `git clone`), then double-click **`START-HERE.bat`** in the
+and unzip it; or `git clone`), then double-click **`START.bat`** in the
 top folder.
 
 **Linux and macOS:**
@@ -24,7 +24,7 @@ top folder.
 ```bash
 git clone https://github.com/Developer3000S/colibri-rus.git
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 Both run `coli setup`, which does the rest:
@@ -52,10 +52,10 @@ Both run `coli setup`, which does the rest:
 5. **Starts colibri** and opens the dashboard in your browser, and prints the
    addresses other apps can use.
 
-What you see on Linux (on Windows the same, in the window `START-HERE.bat` opens):
+What you see on Linux (on Windows the same, in the window `START.bat` opens):
 
 ```
-$ ./start-here.sh
+$ ./start.sh
 colibri setup
 
 Your machine
@@ -89,12 +89,12 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**Later:** run `START-HERE.bat` or `./start-here.sh` again and colibri starts
+**Later:** run `START.bat` or `./start.sh` again and colibri starts
 straight away, with no second download or build. To stop it, press Ctrl+C in
 its window, or run `c/coli stop` from another terminal (`c\coli.cmd stop` on
 Windows). `c/coli status` shows what is installed, whether it runs, its
 addresses and the speed of the last answer. To pick another model:
-`./start-here.sh --reconfigure`.
+`./start.sh --reconfigure`.
 
 **On WSL** keep the model on the Linux disk (the default, `~/colibri-models`),
 never under `/mnt/c`. If WSL's own network is much slower than Windows' (it can
@@ -189,7 +189,7 @@ API gateway are Python scripts (the engine itself is pure C and needs nothing).
 No renaming, no configuration: the launcher finds `colibri.exe` next to itself.
 With an NVIDIA RTX 30, 40 or 50 series card, also unpack
 `colibri-<version>-windows-x86_64-cuda.zip` into the same folder for CUDA
-([windows.md](windows.md#if-you-downloaded-a-release-archive-start-here)).
+([windows.md](windows.md#if-you-downloaded-a-release-archive-start)).
 
 For better understanding, from powershell prompt, a complete invocation line 
 (relying on py launcher, to be launched from the folder where colibri.exe is) is:

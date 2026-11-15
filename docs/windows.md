@@ -7,7 +7,7 @@ A start-to-finish, reproducible path from a fresh Windows 11 machine to GLM-5.2 
 ## The one-step way
 
 Download the repository (**Code**, then **Download ZIP**, or `git clone`), unzip
-it and double-click **`START-HERE.bat`**. It checks for Python (and offers to
+it and double-click **`START.bat`**. It checks for Python (and offers to
 install it with winget), finds your hardware, recommends a model that fits,
 gets the engine (built with MSYS2 when it is installed, with Vulkan when your
 GPU can use it; otherwise the prebuilt one from the release, which runs on the

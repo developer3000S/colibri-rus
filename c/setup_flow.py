@@ -1220,6 +1220,23 @@ def run_environment(backend, engine, family, hw):
     return env
 
 
+def lan_environment(host, env):
+    """The two opt-ins an unauthenticated bind beyond localhost needs. Derived
+    from the configured host on every start rather than saved in setup.json, so
+    `coli start` reaches the LAN even for a configuration written by an older
+    launcher, and a switch back to localhost does not leave the guard disabled."""
+    if host in ("127.0.0.1", "localhost", "::1", ""):
+        return {}
+    if env.get("COLI_API_KEY"):
+        return {}                      # the bind is authenticated already
+    out = {}
+    if not env.get("COLI_ALLOW_INSECURE_BIND"):
+        out["COLI_ALLOW_INSECURE_BIND"] = "1"
+    if not env.get("COLI_ALLOWED_HOSTS"):
+        out["COLI_ALLOWED_HOSTS"] = "*"
+    return out
+
+
 def applies_plan(backend, family):
     """Whether the recorded run passes --auto-tier, which applies the plan the setup
     prints (the expert cache, RAM_GB) and a `coli tune` profile. CUDA always did. On
@@ -1483,6 +1500,7 @@ def start_server(cfg, *, background=False, open_browser=True, out=print, wait=5.
         cmd.append("--no-browser")
     env = dict(cfg.get("env") or {})
     env.update(os.environ)          # what the user sets explicitly wins
+    env.update(lan_environment(host, env))
     env["PYTHONUNBUFFERED"] = "1"
     if not background:
         print_urls(cfg, out)
@@ -2053,8 +2071,12 @@ def cmd_setup(a, ui=None):
         return 0
 
     write_state("starting")
-    overriding = bool(a.backend or a.no_gpu or a.host is not None or a.port is not None)
-    if cfg and not picking and not overriding and config_ready(cfg):
+    # --backend/--no-gpu change what has to be built. --host/--port only change
+    # how an already installed server is reached, so a ready setup applies them
+    # in place below instead of re-probing the hardware and re-running the
+    # whole install (start.sh passes the LAN bind on every run).
+    rebuilding = bool(a.backend or a.no_gpu)
+    if cfg and not picking and not rebuilding and config_ready(cfg):
         cfg = remember_split_dirs(cfg, out=ui.say)
         tag = release_cuda_missing(cfg)
         if tag:
@@ -2082,6 +2104,16 @@ def cmd_setup(a, ui=None):
                 cfg = dict(cfg, args=args, ctx=requested_ctx)
                 save_config(cfg)
                 ui.say(f"  context: {requested_ctx or 'automatic'} from now on")
+            if a.host is not None or a.port is not None:
+                host = a.host if a.host is not None else cfg.get("host", DEFAULT_HOST)
+                port = int(a.port if a.port is not None else cfg.get("port", DEFAULT_PORT))
+                if (host, port) != (cfg.get("host", DEFAULT_HOST),
+                                    int(cfg.get("port", DEFAULT_PORT))):
+                    args = _replace_arg(cfg["args"], "--host", host)
+                    args = _replace_arg(args, "--port", str(port))
+                    cfg = save_config(dict(cfg, host=host, port=port, args=args,
+                                           urls=urls(host, port)))
+                    ui.say(f"  now serving on {host}:{port}")
             refresh_configured(cfg, out=ui.say)
             write_state("ready", model=(cfg.get("model") or {}).get("id"),
                         model_dir=cfg["model_dir"])

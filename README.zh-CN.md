@@ -41,7 +41,7 @@ $ ./coli chat
 **Windows**
 
 1. 在本页面点击 **Code**，再点击 **Download ZIP**，然后解压。
-2. 在解压后的文件夹中双击 **`START-HERE.bat`**。如果电脑上没有 Python，它会提出帮你安装。
+2. 在解压后的文件夹中双击 **`START.bat`**。如果电脑上没有 Python，它会提出帮你安装。
 
 **Linux**（Ubuntu 和 Debian；其他发行版也有同样的软件包，只是名称不同）
 
@@ -49,7 +49,7 @@ $ ./coli chat
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS**（需要 [Homebrew](https://brew.sh)）
@@ -59,7 +59,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 你只需要回答一个问题：用哪个模型，直接按回车就采用推荐。然后安装程序会：
@@ -78,9 +78,9 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**下次使用时**，再次运行 `START-HERE.bat` 或 `./start-here.sh` 即可：colibri 会直接启动，不再下载，也不再编译。`c/coli status` 显示安装了什么以及它是否在运行，`c/coli stop` 用来停止它（Windows 上为 `c\coli.cmd status` 和 `c\coli.cmd stop`）。
+**下次使用时**，再次运行 `START.bat` 或 `./start.sh` 即可：colibri 会直接启动，不再下载，也不再编译。`c/coli status` 显示安装了什么以及它是否在运行，`c/coli stop` 用来停止它（Windows 上为 `c\coli.cmd status` 和 `c\coli.cmd stop`）。
 
-选项写在 `./start-here.sh` 或 `START-HERE.bat` 后面：
+选项写在 `./start.sh` 或 `START.bat` 后面：
 
 | 选项 | 作用 |
 |---|---|
@@ -100,10 +100,10 @@ Starting colibri
 |---|---|
 | 下载过程中停止了 | 再次运行同一条命令：它会从磁盘上已有的字节处继续 |
 | `to use the GPU through ..., first run: <command>` | 运行这条命令，然后再运行一次安装程序：它会为 GPU 重新编译，不会重新下载 |
-| `the ... build failed`，例如已安装的 CUDA toolkit 不再支持这张显卡时出现的 `Unsupported gpu architecture` | 安装程序会先把 toolkit 和显卡对照检查，自行选择 Vulkan，并说明原因；如果编译仍然失败，它会提供下一个选项（先 Vulkan，再 CPU）。`./start-here.sh --backend vulkan` 强制使用 Vulkan；`--no-gpu` 则只使用 CPU |
+| `the ... build failed`，例如已安装的 CUDA toolkit 不再支持这张显卡时出现的 `Unsupported gpu architecture` | 安装程序会先把 toolkit 和显卡对照检查，自行选择 Vulkan，并说明原因；如果编译仍然失败，它会提供下一个选项（先 Vulkan，再 CPU）。`./start.sh --backend vulkan` 强制使用 Vulkan；`--no-gpu` 则只使用 CPU |
 | `needs N GB free for the download` | 用 `--dir` 指定一个更大磁盘上的文件夹 |
 | 在 WSL 中，模型文件夹位于 `/mnt/c` 下 | 把它放在 Linux 磁盘上（即默认的 `~/colibri-models`）：`/mnt/c` 要慢很多倍 |
-| 更新了代码（`git pull`） | 重新运行 `./start-here.sh`：如果源代码有变化，它会先重新编译引擎，再启动 |
+| 更新了代码（`git pull`） | 重新运行 `./start.sh`：如果源代码有变化，它会先重新编译引擎，再启动 |
 | 其他情况 | `c/coli logs -n 50` 显示后台启动的服务器的日志（前台启动的服务器输出在它自己的终端里），`c/coli logs --install` 显示安装程序的日志；提交一个 [issue](https://github.com/Developer3000S/colibri-rus/issues)，附上安装程序最后打印的几行 |
 
 ### 让 AI 助手帮你安装
@@ -134,7 +134,7 @@ Starting colibri
 
 ## 我的机器适合哪个模型
 
-安装程序会推荐能在你的机器上完全从内存运行的最强模型，并在它下面列出从磁盘流式读取的更大模型。`./start-here.sh --list` 会把所有模型与你的机器逐一对照。下面的表格与安装程序自己的目录（[`c/setup_catalog.py`](c/setup_catalog.py)）一致；下载大小是 Hugging Face 为每个仓库列出的大小。
+安装程序会推荐能在你的机器上完全从内存运行的最强模型，并在它下面列出从磁盘流式读取的更大模型。`./start.sh --list` 会把所有模型与你的机器逐一对照。下面的表格与安装程序自己的目录（[`c/setup_catalog.py`](c/setup_catalog.py)）一致；下载大小是 Hugging Face 为每个仓库列出的大小。
 
 - **内存**一栏是两个数字：低于第一个数字时模型无法启动，达到第二个数字时，它的运行速度与实测一致。
 - **GPU** 一栏是安装程序能为该引擎编译的 GPU 版本（[GPU](#gpus)）。*含集成显卡*表示它也会使用集成显卡，这些引擎在集成显卡上实测更快；其他引擎只使用独立显卡。
@@ -476,7 +476,7 @@ colibri 希望前沿模型更少依赖稀缺硬件，运行成本更低。这意
 ## 仓库结构
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

@@ -56,7 +56,7 @@ connection. A graphics card is optional.
 **Windows**
 
 1. On this page click **Code**, then **Download ZIP**, and unzip it.
-2. Double-click **`START-HERE.bat`** in the unzipped folder. If Python is
+2. Double-click **`START.bat`** in the unzipped folder. If Python is
    missing, it offers to install it for you.
 
 **Linux** (Ubuntu and Debian; other distributions have the same packages under
@@ -66,7 +66,7 @@ their own names)
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS** (with [Homebrew](https://brew.sh))
@@ -76,7 +76,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 You answer one question, which model, and Enter takes the recommendation. Then
@@ -108,12 +108,12 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**Next time**, run `START-HERE.bat` or `./start-here.sh` again: colibri starts
+**Next time**, run `START.bat` or `./start.sh` again: colibri starts
 straight away, with no download and no build. `c/coli status` shows what is
 installed and whether it runs, `c/coli stop` stops it (`c\coli.cmd status` and
 `c\coli.cmd stop` on Windows).
 
-Options go after `./start-here.sh` or `START-HERE.bat`:
+Options go after `./start.sh` or `START.bat`:
 
 | Option | What it does |
 |---|---|
@@ -133,10 +133,10 @@ What each step does, in detail: [docs/quickstart.md](docs/quickstart.md#the-one-
 |---|---|
 | it stopped during the download | run the same command again: it resumes from the bytes already on disk |
 | `to use the GPU through ..., first run: <command>` | run that command, then the setup again: it rebuilds for the GPU and does not download again |
-| `the ... build failed`, for example `Unsupported gpu architecture` when the installed CUDA toolkit no longer supports the card | the setup checks the toolkit against the card first and picks Vulkan by itself, saying why; if a build still fails it offers the next one (Vulkan, then the CPU). `./start-here.sh --backend vulkan` forces Vulkan; `--no-gpu` stays on the CPU |
+| `the ... build failed`, for example `Unsupported gpu architecture` when the installed CUDA toolkit no longer supports the card | the setup checks the toolkit against the card first and picks Vulkan by itself, saying why; if a build still fails it offers the next one (Vulkan, then the CPU). `./start.sh --backend vulkan` forces Vulkan; `--no-gpu` stays on the CPU |
 | `needs N GB free for the download` | `--dir` with a folder on a bigger disk |
 | on WSL, the model folder is under `/mnt/c` | keep it on the Linux disk (the default, `~/colibri-models`): `/mnt/c` is many times slower |
-| you updated the checkout (`git pull`) | run `./start-here.sh` again: it rebuilds the engine when the sources changed, then starts it |
+| you updated the checkout (`git pull`) | run `./start.sh` again: it rebuilds the engine when the sources changed, then starts it |
 | anything else | `c/coli logs -n 50` shows the log of a server started in the background (one started in the foreground prints to its own terminal) and `c/coli logs --install` the setup's; open an [issue](https://github.com/Developer3000S/colibri-rus/issues) with the last lines the setup printed |
 
 ### Let your AI assistant set it up
@@ -188,7 +188,7 @@ quietly redefine the model. [How it works](#how-it-works) has the details.
 
 The setup recommends the most capable model that runs from RAM on your
 machine, and lists the larger ones that stream from the disk right below it.
-`./start-here.sh --list` shows them all against your machine. The tables follow
+`./start.sh --list` shows them all against your machine. The tables follow
 the setup's own catalog ([`c/setup_catalog.py`](c/setup_catalog.py)); the
 downloads are the sizes Hugging Face lists for each repository.
 
@@ -763,7 +763,7 @@ well-controlled failure is worth more here than an unexplained fast number.
 ## Repo layout
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

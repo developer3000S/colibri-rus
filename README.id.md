@@ -57,7 +57,7 @@ internet. Kartu grafis bersifat opsional.
 
 1. Di halaman ini, klik **Code**, lalu **Download ZIP**, kemudian ekstrak file
    tersebut.
-2. Klik dua kali **`START-HERE.bat`** di folder hasil ekstraksi. Jika Python
+2. Klik dua kali **`START.bat`** di folder hasil ekstraksi. Jika Python
    belum tersedia, skrip akan menawarkan untuk menginstalnya.
 
 **Linux** (Ubuntu dan Debian; distribusi lain memiliki paket yang sama dengan
@@ -67,7 +67,7 @@ nama masing-masing)
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS** (dengan [Homebrew](https://brew.sh))
@@ -77,7 +77,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 Anda menjawab satu pertanyaan, yaitu model mana yang ingin digunakan, dan
@@ -112,13 +112,13 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**Pada penggunaan berikutnya**, jalankan kembali `START-HERE.bat` atau
-`./start-here.sh`: colibri akan langsung berjalan tanpa mengunduh atau melakukan
+**Pada penggunaan berikutnya**, jalankan kembali `START.bat` atau
+`./start.sh`: colibri akan langsung berjalan tanpa mengunduh atau melakukan
 build lagi. `c/coli status` menunjukkan apa yang sudah terinstal dan apakah
 sedang berjalan, sedangkan `c/coli stop` menghentikannya (`c\coli.cmd status`
 dan `c\coli.cmd stop` di Windows).
 
-Opsi ditempatkan setelah `./start-here.sh` atau `START-HERE.bat`:
+Opsi ditempatkan setelah `./start.sh` atau `START.bat`:
 
 | Opsi | Fungsinya |
 |---|---|
@@ -139,7 +139,7 @@ Penjelasan mendetail mengenai setiap langkah:
 |---|---|
 | proses berhenti saat mengunduh | jalankan kembali perintah yang sama: unduhan dilanjutkan dari byte yang sudah tersimpan di disk |
 | `to use the GPU through ..., first run: <command>` | jalankan perintah tersebut, lalu jalankan kembali proses penyiapan: engine akan di-build ulang untuk GPU tanpa mengunduh ulang |
-| `the ... build failed`, misalnya `Unsupported gpu architecture` ketika CUDA toolkit yang terinstal tidak lagi mendukung kartu tersebut | proses penyiapan terlebih dahulu memeriksa toolkit terhadap kartu dan memilih Vulkan secara otomatis sambil menjelaskan alasannya; jika build masih gagal, proses tersebut menawarkan pilihan berikutnya (Vulkan, lalu CPU). `./start-here.sh --backend vulkan` memaksa penggunaan Vulkan; `--no-gpu` tetap menggunakan CPU |
+| `the ... build failed`, misalnya `Unsupported gpu architecture` ketika CUDA toolkit yang terinstal tidak lagi mendukung kartu tersebut | proses penyiapan terlebih dahulu memeriksa toolkit terhadap kartu dan memilih Vulkan secara otomatis sambil menjelaskan alasannya; jika build masih gagal, proses tersebut menawarkan pilihan berikutnya (Vulkan, lalu CPU). `./start.sh --backend vulkan` memaksa penggunaan Vulkan; `--no-gpu` tetap menggunakan CPU |
 | `needs N GB free for the download` | gunakan `--dir` dengan folder pada disk yang lebih besar |
 | di WSL, folder model berada di bawah `/mnt/c` | simpan di disk Linux (default, `~/colibri-models`): `/mnt/c` berkali-kali lebih lambat |
 | hal lainnya | `c/coli logs -n 50` menampilkan log server dan `c/coli logs --install` menampilkan log proses penyiapan; buka [issue](https://github.com/Developer3000S/colibri-rus/issues) dengan menyertakan baris terakhir yang ditampilkan proses penyiapan |
@@ -202,7 +202,7 @@ model. [Cara kerjanya](#how-it-works) menjelaskan detailnya.
 
 Proses penyiapan merekomendasikan model paling kapabel yang dapat berjalan dari
 RAM pada mesin Anda, lalu mencantumkan tepat di bawahnya model yang lebih besar
-yang melakukan streaming dari disk. `./start-here.sh --list` menampilkan
+yang melakukan streaming dari disk. `./start.sh --list` menampilkan
 semuanya untuk mesin Anda. Tabel berikut mengikuti katalog milik proses
 penyiapan ([`c/setup_catalog.py`](c/setup_catalog.py)); ukuran unduhan adalah
 ukuran yang dicantumkan Hugging Face untuk setiap repository.
@@ -820,7 +820,7 @@ penjelasan.
 ## Struktur repository
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

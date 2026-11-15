@@ -41,7 +41,7 @@ $ ./coli chat
 **Windows**
 
 1. このページで **Code** をクリックし、次に **Download ZIP** をクリックして、ZIP を展開します。
-2. 展開したフォルダーの中の **`START-HERE.bat`** をダブルクリックします。Python が入っていない場合は、その場でインストールすることを提案してくれます。
+2. 展開したフォルダーの中の **`START.bat`** をダブルクリックします。Python が入っていない場合は、その場でインストールすることを提案してくれます。
 
 **Linux**（Ubuntu と Debian の場合。ほかのディストリビューションにも、同じパッケージがそれぞれの名前で用意されています）
 
@@ -49,7 +49,7 @@ $ ./coli chat
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS**（[Homebrew](https://brew.sh) を使用）
@@ -59,7 +59,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 聞かれる質問は「どのモデルにするか」の 1 つだけで、Enter を押せば推奨のモデルが選ばれます。そのあとセットアップは次のことを行います：
@@ -78,9 +78,9 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**次回からは**、`START-HERE.bat` か `./start-here.sh` をもう一度実行するだけです：ダウンロードもビルドもなしに、colibri がすぐに起動します。`c/coli status` は何がインストールされていて、動いているかどうかを表示し、`c/coli stop` で停止します（Windows では `c\coli.cmd status` と `c\coli.cmd stop`）。
+**次回からは**、`START.bat` か `./start.sh` をもう一度実行するだけです：ダウンロードもビルドもなしに、colibri がすぐに起動します。`c/coli status` は何がインストールされていて、動いているかどうかを表示し、`c/coli stop` で停止します（Windows では `c\coli.cmd status` と `c\coli.cmd stop`）。
 
-オプションは `./start-here.sh` または `START-HERE.bat` のあとに付けます：
+オプションは `./start.sh` または `START.bat` のあとに付けます：
 
 | オプション | 何をするか |
 |---|---|
@@ -100,10 +100,10 @@ Starting colibri
 |---|---|
 | ダウンロード中に止まった | 同じコマンドをもう一度実行する：ディスクにすでにあるバイトから再開します |
 | `to use the GPU through ..., first run: <command>` | そのコマンドを実行してから、もう一度セットアップを実行する：GPU 向けにビルドし直し、ダウンロードはやり直しません |
-| `the ... build failed`。たとえば、インストールされている CUDA ツールキットがそのカードをもうサポートしていないときの `Unsupported gpu architecture` | セットアップはまずツールキットをカードと照らし合わせてチェックし、自分で Vulkan を選びます（理由も表示します）。それでもビルドが失敗する場合は次の選択肢（Vulkan、その次に CPU）を提示します。`./start-here.sh --backend vulkan` は Vulkan を強制します。`--no-gpu` なら CPU のままです |
+| `the ... build failed`。たとえば、インストールされている CUDA ツールキットがそのカードをもうサポートしていないときの `Unsupported gpu architecture` | セットアップはまずツールキットをカードと照らし合わせてチェックし、自分で Vulkan を選びます（理由も表示します）。それでもビルドが失敗する場合は次の選択肢（Vulkan、その次に CPU）を提示します。`./start.sh --backend vulkan` は Vulkan を強制します。`--no-gpu` なら CPU のままです |
 | `needs N GB free for the download` | `--dir` で、より大きなディスク上のフォルダーを指定する |
 | WSL で、モデルのフォルダーが `/mnt/c` の下にある | Linux 側のディスク（デフォルトの `~/colibri-models`）に置く：`/mnt/c` は何倍も遅くなります |
-| チェックアウトを更新した（`git pull`） | `./start-here.sh` をもう一度実行してください。ソースが変わっていればエンジンを再ビルドしてから起動します |
+| チェックアウトを更新した（`git pull`） | `./start.sh` をもう一度実行してください。ソースが変わっていればエンジンを再ビルドしてから起動します |
 | それ以外 | `c/coli logs -n 50` でバックグラウンドで起動したサーバーのログを（フォアグラウンドで起動したサーバーは自分のターミナルに出力します）、`c/coli logs --install` でセットアップのログを表示できます。セットアップが最後に表示した数行を添えて [issue](https://github.com/Developer3000S/colibri-rus/issues) を作成してください |
 
 ### AI アシスタントにセットアップしてもらう
@@ -134,7 +134,7 @@ Mixture-of-Experts モデルは、ディスク上では巨大でも、1 トー�
 
 ## 自分のマシンに合うモデル
 
-セットアップは、あなたのマシンで RAM から動かせるモデルのうち最も高性能なものを推奨し、そのすぐ下に、ディスクからストリーミングする、より大きなモデルを並べます。`./start-here.sh --list` を実行すると、すべてのモデルをこのマシンと照らし合わせて表示します。以下の表はセットアップ自身のカタログ（[`c/setup_catalog.py`](c/setup_catalog.py)）に沿っています。ダウンロードのサイズは、Hugging Face が各リポジトリについて表示しているサイズです。
+セットアップは、あなたのマシンで RAM から動かせるモデルのうち最も高性能なものを推奨し、そのすぐ下に、ディスクからストリーミングする、より大きなモデルを並べます。`./start.sh --list` を実行すると、すべてのモデルをこのマシンと照らし合わせて表示します。以下の表はセットアップ自身のカタログ（[`c/setup_catalog.py`](c/setup_catalog.py)）に沿っています。ダウンロードのサイズは、Hugging Face が各リポジトリについて表示しているサイズです。
 
 - **RAM** は 2 つの数値です：1 つ目を下回るとモデルは起動せず、2 つ目以上あれば計測値どおりに動きます。
 - **GPU** は、セットアップがそのエンジン向けにビルドできるものです（[GPU](#gpus)）。*内蔵 GPU も* とあるものは内蔵 GPU も使います。これらのエンジンは内蔵 GPU で速くなることが計測されています。それ以外のエンジンはディスクリート GPU だけを使います。
@@ -482,7 +482,7 @@ colibri は、フロンティアモデルが希少なハードウェアに頼る
 ## リポジトリ構成
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

@@ -721,6 +721,16 @@ class RunConfiguration(HomeTestCase):
                          2.5)
         self.assertIsNone(setup_flow.last_turn_speed({"turns": []}))
 
+    def test_lan_bind_gets_the_opt_ins_it_needs(self):
+        # start.sh's LAN default: the API refuses an unauthenticated non-loopback
+        # bind, and the Host guard refuses an IP the wildcard bind never learned.
+        self.assertEqual(setup_flow.lan_environment("127.0.0.1", {}), {})
+        self.assertEqual(setup_flow.lan_environment("0.0.0.0", {}),
+                         {"COLI_ALLOW_INSECURE_BIND": "1", "COLI_ALLOWED_HOSTS": "*"})
+        self.assertEqual(setup_flow.lan_environment("0.0.0.0", {"COLI_API_KEY": "k"}), {})
+        self.assertEqual(setup_flow.lan_environment("0.0.0.0", {"COLI_ALLOW_INSECURE_BIND": "0"}),
+                         {"COLI_ALLOWED_HOSTS": "*"})
+
 
 class EngineResolution(HomeTestCase):
     def test_binary_backend(self):

@@ -313,7 +313,7 @@ decision API (System One).
   opened at run time, so these engines still start on a machine without one,
   on the CPU. `coli setup` uses them without a Vulkan toolchain.
 
-- **#1842**: one-step install and start (`start-here`, `coli setup`), the
+- **#1842**: one-step install and start (`start`, `coli setup`), the
   `AI_SETUP.md` guide and an MCP server.
 - **#1850**, **#1896**: setup picks the backend that works on the machine: on an
   integrated GPU, Vulkan only where it was measured faster; CUDA only when the

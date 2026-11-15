@@ -57,7 +57,7 @@ $ ./coli chat
 **Windows**
 
 1. На этой странице нажмите **Код**, затем **Загрузить ZIP** и разархивируйте его.
-2. Дважды щелкните **`START-HERE.bat`** в разархивированной папке. Если Python
+2. Дважды щелкните **`START.bat`** в разархивированной папке. Если Python
    отсутствует, он предлагает установить его для вас.
 
 **Linux** (Ubuntu и Debian; в других дистрибутивах такие же пакеты находятся под
@@ -67,7 +67,7 @@ $ ./coli chat
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS** (с [Homebrew](https://brew.sh))
@@ -77,7 +77,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 Вы отвечаете на один вопрос, какая модель, и Enter принимает рекомендацию. Тогда
@@ -108,12 +108,12 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**В следующий раз** снова запустите `START-HERE.bat` или `./start-here.sh`: запустится colibri
+**В следующий раз** снова запустите `START.bat` или `./start.sh`: запустится colibri
 сразу, без загрузки и сборки. `c/coli status` показывает, что такое
 установлен и работает ли он, `c/coli stop` останавливает его (`c\coli.cmd status` и
 `c\coli.cmd stop` в Windows).
 
-Варианты идут после `./start-here.sh` или `START-HERE.bat`:
+Варианты идут после `./start.sh` или `START.bat`:
 
 | Вариант | Что он делает |
 |---|---|
@@ -134,10 +134,10 @@ Starting colibri
 |---|---|
 | остановилось во время загрузки | запустите ту же команду еще раз: она возобновляется с уже имеющихся на диске байтов |
 | `to use the GPU through ..., first run: <command>` | запустите эту команду, затем повторите настройку: она перестраивается для графического процессора и больше не загружается |
-| `the ... build failed`, например `Unsupported gpu architecture`, когда установленный набор инструментов CUDA больше не поддерживает карту | установка сначала сверяет набор инструментов с картой и сама выбирает Vulkan, объясняя, почему; если сборка по-прежнему не удалась, он предлагает следующую (Vulkan, затем процессор). `./start-here.sh --backend vulkan` силы Vulkanа; `--no-gpu` остается на процессоре |
+| `the ... build failed`, например `Unsupported gpu architecture`, когда установленный набор инструментов CUDA больше не поддерживает карту | установка сначала сверяет набор инструментов с картой и сама выбирает Vulkan, объясняя, почему; если сборка по-прежнему не удалась, он предлагает следующую (Vulkan, затем процессор). `./start.sh --backend vulkan` силы Vulkanа; `--no-gpu` остается на процессоре |
 | `needs N GB free for the download` | `--dir` с папкой на диске большего размера |
 | в WSL папка модели находится под `/mnt/c` | сохраните его на диске Linux (по умолчанию `~/colibri-models`): `/mnt/c` во много раз медленнее |
-| вы обновили кассу (`git pull`) | запустите `./start-here.sh` еще раз: он пересобирает движок при изменении исходных кодов, а затем запускает его |
+| вы обновили кассу (`git pull`) | запустите `./start.sh` еще раз: он пересобирает движок при изменении исходных кодов, а затем запускает его |
 | что-нибудь еще | `c/coli logs -n 50` показывает журнал сервера, запущенного в фоновом режиме (сервер, запущенный на переднем плане, печатается на свой собственный терминал) и `c/coli logs --install` настройки; откройте [проблему](https://github.com/Developer3000S/colibri-rus/issues) с последними строками, напечатанными установкой |
 
 <a id="let-your-ai-assistant-set-it-up"></a>
@@ -191,7 +191,7 @@ Starting colibri
 
 Программа установки рекомендует наиболее мощную модель, которая работает из оперативной памяти вашего компьютера.
 машине, и перечисляет более крупные из них, которые передаются с диска прямо под ним.
-`./start-here.sh --list` показывает их всех против вашей машины. Таблицы следуют
+`./start.sh --list` показывает их всех против вашей машины. Таблицы следуют
 собственный каталог установки ([`c/setup_catalog.py`](c/setup_catalog.py)); тот
 загрузки — это размеры списков Hugging Face для каждого репозитория.
 
@@ -773,7 +773,7 @@ colibri хочет, чтобы передовые модели меньше за
 ## Макет репо
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

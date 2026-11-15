@@ -3,7 +3,7 @@
 This page is written for an AI coding assistant that a user asked to install,
 start, check or stop colibri on their machine. Every step is a command with a
 machine-readable result. A person can follow it too; the one-step path for
-people is `START-HERE.bat` (Windows) or `./start-here.sh` (Linux, macOS), see
+people is `START.bat` (Windows) or `./start.sh` (Linux, macOS), see
 [quickstart.md](quickstart.md).
 
 If your client speaks the Model Context Protocol, the same operations are

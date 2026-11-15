@@ -8,13 +8,15 @@ rem dashboard in your browser.
 rem Later runs: start colibri straight away.
 rem
 rem Options are passed through to `coli setup`, for example:
-rem     START-HERE.bat --model qwen3-coder-30b --dir D:\colibri-models
-rem     START-HERE.bat --reconfigure          choose another model
-rem     START-HERE.bat --no-gpu               CPU only
+rem     START.bat --model qwen3-coder-30b --dir D:\colibri-models
+rem     START.bat --reconfigure          choose another model
+rem     START.bat --no-gpu               CPU only
 rem Stop: close this window, or press Ctrl+C in it.
+rem Reach it from other devices on the LAN: set COLI_HOST=127.0.0.1 to keep it local.
 setlocal
 title colibri
 cd /d "%~dp0"
+if not defined COLI_HOST set "COLI_HOST=0.0.0.0"
 
 set "COLI_LAUNCHER="
 if exist "%~dp0c\coli" set "COLI_LAUNCHER=%~dp0c\coli"
@@ -35,11 +37,15 @@ if not defined COLI_PY_EXE call :find_user_python
 if not defined COLI_PY_EXE goto :no_python
 
 :run
-"%COLI_PY_EXE%" %COLI_PY_ARG% "%COLI_LAUNCHER%" setup %*
+if not defined COLI_API_KEY if /I not "%COLI_HOST%"=="127.0.0.1" if /I not "%COLI_HOST%"=="localhost" if /I not "%COLI_HOST%"=="::1" (
+    if not defined COLI_ALLOW_INSECURE_BIND set "COLI_ALLOW_INSECURE_BIND=1"
+    if not defined COLI_ALLOWED_HOSTS set "COLI_ALLOWED_HOSTS=*"
+)
+"%COLI_PY_EXE%" %COLI_PY_ARG% "%COLI_LAUNCHER%" setup --host "%COLI_HOST%" %*
 set "COLI_RC=%ERRORLEVEL%"
 if "%COLI_RC%"=="0" exit /b 0
 echo.
-echo colibri stopped (code %COLI_RC%). Read the message above; running START-HERE.bat
+echo colibri stopped (code %COLI_RC%). Read the message above; running START.bat
 echo again continues where it stopped.
 goto :hold_fail
 
@@ -62,12 +68,12 @@ call :find_user_python
 if defined COLI_PY_EXE goto :run
 echo.
 echo Python was installed, but this window cannot see it yet. Close it and
-echo double-click START-HERE.bat again.
+echo double-click START.bat again.
 goto :hold_fail
 
 :manual_python
 echo Install it from https://www.python.org/downloads/ and tick
-echo "Add python.exe to PATH" in the installer, then double-click START-HERE.bat again.
+echo "Add python.exe to PATH" in the installer, then double-click START.bat again.
 
 :hold_fail
 echo.

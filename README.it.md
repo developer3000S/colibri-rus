@@ -58,7 +58,7 @@ internet. La scheda grafica è facoltativa.
 
 1. In questa pagina fai clic su **Code**, poi su **Download ZIP**, ed estrai
    l'archivio.
-2. Fai doppio clic su **`START-HERE.bat`** nella cartella estratta. Se manca
+2. Fai doppio clic su **`START.bat`** nella cartella estratta. Se manca
    Python, si offre di installarlo per te.
 
 **Linux** (Ubuntu e Debian; le altre distribuzioni hanno gli stessi pacchetti
@@ -68,7 +68,7 @@ con i loro nomi)
 sudo apt install git python3 build-essential
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 **macOS** (con [Homebrew](https://brew.sh))
@@ -78,7 +78,7 @@ xcode-select --install
 brew install libomp git python
 git clone https://github.com/Developer3000S/colibri-rus
 cd colibri
-./start-here.sh
+./start.sh
 ```
 
 Rispondi a una sola domanda, quale modello, e Invio accetta il consiglio. Poi
@@ -111,12 +111,12 @@ Starting colibri
   stop: press Ctrl+C here (or close this window)
 ```
 
-**La volta successiva**, rilancia `START-HERE.bat` o `./start-here.sh`: colibri
+**La volta successiva**, rilancia `START.bat` o `./start.sh`: colibri
 parte subito, senza download e senza compilazione. `c/coli status` mostra cosa è
 installato e se è in esecuzione, `c/coli stop` lo ferma (`c\coli.cmd status` e
 `c\coli.cmd stop` su Windows).
 
-Le opzioni vanno dopo `./start-here.sh` o `START-HERE.bat`:
+Le opzioni vanno dopo `./start.sh` o `START.bat`:
 
 | Opzione | Cosa fa |
 |---|---|
@@ -136,10 +136,10 @@ Cosa fa ogni passo, nel dettaglio: [docs/quickstart.md](docs/quickstart.md#the-o
 |---|---|
 | si è fermato durante il download | rilancia lo stesso comando: riprende dai byte già presenti sul disco |
 | `to use the GPU through ..., first run: <command>` | esegui quel comando, poi di nuovo l'installazione: ricompila per la GPU e non riscarica nulla |
-| `the ... build failed`, per esempio `Unsupported gpu architecture` quando il CUDA toolkit installato non supporta più la scheda | l'installazione controlla prima il toolkit rispetto alla scheda e sceglie Vulkan da sé, spiegando perché; se una compilazione fallisce ancora, offre la prossima (Vulkan, poi la CPU). `./start-here.sh --backend vulkan` forza Vulkan; `--no-gpu` resta sulla CPU |
+| `the ... build failed`, per esempio `Unsupported gpu architecture` quando il CUDA toolkit installato non supporta più la scheda | l'installazione controlla prima il toolkit rispetto alla scheda e sceglie Vulkan da sé, spiegando perché; se una compilazione fallisce ancora, offre la prossima (Vulkan, poi la CPU). `./start.sh --backend vulkan` forza Vulkan; `--no-gpu` resta sulla CPU |
 | `needs N GB free for the download` | `--dir` con una cartella su un disco più grande |
 | su WSL, la cartella del modello è sotto `/mnt/c` | tienila sul disco Linux (il predefinito, `~/colibri-models`): `/mnt/c` è molte volte più lento |
-| hai aggiornato il checkout (`git pull`) | rilancia `./start-here.sh`: ricompila il motore se i sorgenti sono cambiati, poi lo avvia |
+| hai aggiornato il checkout (`git pull`) | rilancia `./start.sh`: ricompila il motore se i sorgenti sono cambiati, poi lo avvia |
 | qualsiasi altra cosa | `c/coli logs -n 50` mostra il log del server avviato in background (quello avviato in primo piano scrive nel suo terminale) e `c/coli logs --install` quello dell'installazione; apri una [issue](https://github.com/Developer3000S/colibri-rus/issues) con le ultime righe stampate dall'installazione |
 
 ### Lascia che sia il tuo assistente AI a installarlo
@@ -198,7 +198,7 @@ costare velocità; non deve ridefinire il modello di nascosto. I dettagli sono i
 
 L'installazione consiglia il modello più capace che gira dalla RAM sulla tua
 macchina, e subito sotto elenca quelli più grandi, che vengono letti dal disco in
-streaming. `./start-here.sh --list` li mostra tutti confrontati con la tua
+streaming. `./start.sh --list` li mostra tutti confrontati con la tua
 macchina. Le tabelle seguono il catalogo dell'installazione stessa
 ([`c/setup_catalog.py`](c/setup_catalog.py)); i download sono le dimensioni che
 Hugging Face indica per ciascun repository.
@@ -798,7 +798,7 @@ fallimento ben controllato vale più di un numero veloce senza spiegazione.
 ## Struttura del repository
 
 ```
-start-here.sh, START-HERE.bat   the one-step setup (Linux and macOS, Windows)
+start.sh, START.bat   the one-step setup (Linux and macOS, Windows)
 Makefile                        root build/check entry point
 c/
 ├── colibri.c             GLM-5.2/5.3, Mistral-Large-4  (make glm)

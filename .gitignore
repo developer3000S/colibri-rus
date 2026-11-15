@@ -173,6 +173,8 @@ c/*.obj
 # macOS
 .DS_Store
 **/.DS_Store
+node_modules
+node_modules/
 
 # compiled objects
 *.o

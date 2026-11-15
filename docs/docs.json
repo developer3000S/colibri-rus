@@ -40,6 +40,73 @@
         ]
       },
       {
+        "tab": "Русский",
+        "groups": [
+          {
+            "group": "Начало работы",
+            "pages": [
+              "ru/index",
+              "ru/quickstart",
+              "ru/gguf",
+              "ru/AI_SETUP",
+              "ru/MCP_SERVER"
+            ]
+          },
+          {
+            "group": "Запуск моделей",
+            "pages": [
+              "ru/api-reference/overview",
+              "ru/api",
+              "ru/systemone",
+              "ru/serve_protocol"
+            ]
+          },
+          {
+            "group": "Движки моделей",
+            "pages": [
+              "ru/deepseek-v4",
+              "ru/kimi_k3",
+              "ru/mistral-large4",
+              "ru/qwen38",
+              "ru/qwen36",
+              "ru/inkling",
+              "ru/mimo",
+              "ru/qwen-image",
+              "ru/laya",
+              "ru/gliner_decide",
+              "ru/clef"
+            ]
+          },
+          {
+            "group": "Настройка и тюнинг",
+            "pages": [
+              "ru/SETTINGS",
+              "ru/ENVIRONMENT",
+              "ru/tuning",
+              "ru/speculative",
+              "ru/CACHE_ROUTE"
+            ]
+          },
+          {
+            "group": "Аппаратные бэкенды",
+            "pages": [
+              "ru/cuda",
+              "ru/metal",
+              "ru/vulkan",
+              "ru/gpu-parity",
+              "ru/windows"
+            ]
+          },
+          {
+            "group": "Участие в проекте",
+            "pages": [
+              "ru/benchmarks",
+              "ru/MAINTAINING-DOCS"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "API Reference",
         "openapi": {
           "source": "./api-reference/openapi.json",

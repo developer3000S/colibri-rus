@@ -7,6 +7,7 @@ import de from "./de"
 import it from "./it"
 import id from "./id"
 import ptBR from "./pt-BR"
+import ru from "./ru"
 
 const LOCALES = [
   { code: "en", label: "English" },
@@ -16,6 +17,7 @@ const LOCALES = [
   { code: "de", label: "Deutsch" },
   { code: "id", label: "Bahasa Indonesia" },
   { code: "pt-BR", label: "Português (Brasil)" },
+  { code: "ru", label: "Русский" },
 ] as const
 
 const DICTS: Record<string, Record<string, string>> = {
@@ -26,6 +28,7 @@ const DICTS: Record<string, Record<string, string>> = {
   "de": de,
   "id": id,
   "pt-BR": ptBR,
+  "ru": ru,
 }
 
 const STORAGE_KEY = "colibri-locale"

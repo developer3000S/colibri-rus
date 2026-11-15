@@ -7,13 +7,14 @@ import de from "./de"
 import itDict from "./it"
 import id from "./id"
 import ptBR from "./pt-BR"
+import ru from "./ru"
 
 /* The `t` interpolator only understands the double-brace form, `{{name}}`
  * (see interpolate() in index.ts). A single-brace `{name}` is left verbatim,
  * so it reaches the DOM as literal text — e.g. an image `alt` reading
  * "Attached image {n}". Keep every placeholder in the {{name}} form. */
 const DICTS: Record<string, Record<string, string>> = {
-  en, "zh-CN": zhCN, "zh-TW": zhTW, de, it: itDict, id, "pt-BR": ptBR,
+  en, "zh-CN": zhCN, "zh-TW": zhTW, de, it: itDict, id, "pt-BR": ptBR, ru,
 }
 
 describe("locale dictionaries", () => {
